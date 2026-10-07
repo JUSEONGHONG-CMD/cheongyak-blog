@@ -509,8 +509,10 @@ def first_time_routes(profile: dict, item: dict) -> list[Route]:
     household = profile.get("household") or {}
     married = bool(household.get("marriage_registered"))
     children = int(household.get("children") or 0)
-    if not married and not children and not profile.get("spouse"):
-        # 1인 가구: 2021-11 부터 추첨 물량 중 전용 60㎡ 이하에만 신청 가능
+    if not married and not children and not profile.get("spouse") \
+            and int(household.get("household_size") or 1) == 1:
+        # 1인 가구(단독 세대): 2021-11 부터 추첨 물량 중 전용 60㎡ 이하에만 신청 가능.
+        # 부모 등본에 함께 있는 미혼자는 1인 가구가 아니다.
         me = profile.get("applicant") or {}
         name = "생애최초 특별공급 (1인 가구 추첨)"
         if me.get("ever_owned_home") is True:
