@@ -200,12 +200,26 @@ def run_one(alias, profile, args, keys, cache, today) -> bool:
     return True
 
 
+def group_of_day(today: date) -> str | None:
+    """월·수·금마다 A·B 조를 번갈아 낸다(이번 주 A·B·A 면 다음 주 B·A·B). 그 밖의 요일은 None."""
+    slot = {0: 0, 2: 1, 4: 2}.get(today.weekday())
+    if slot is None:
+        return None
+    week = (today.toordinal() - 1) // 7  # 1년 1월 1일이 월요일이라 주가 월요일에 바뀐다
+    return "AB"[(week * 3 + slot) % 2]
+
+
 def run(args: argparse.Namespace) -> int:
     today = date.today()
     profiles = load_profiles()
     if args.only:
         wanted = {a.strip() for a in args.only.split(",") if a.strip()}
         profiles = {k: v for k, v in profiles.items() if k in wanted}
+    else:
+        group = args.group if args.group != "auto" else group_of_day(today)
+        if group in ("A", "B"):
+            profiles = {k: v for k, v in profiles.items() if v["blog"].get("group") == group}
+        print(f"오늘 조: {group or '전원'} · {len(profiles)}명")
     keys = {
         "service": env("ODCLOUD_SERVICE_KEY"),
         "kakao": env("KAKAO_REST_API_KEY", required=False) or "",
@@ -230,7 +244,9 @@ def run(args: argparse.Namespace) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="청약 블로그 원고 생성기")
     parser.add_argument("--preview", metavar="DIR", help="메일을 보내지 않고 DIR/<별칭>.html 로 저장 (발송 이력도 안 남김)")
-    parser.add_argument("--only", metavar="ALIAS", help="이 별칭들만 (쉼표로 여러 명)")
+    parser.add_argument("--only", metavar="ALIAS", help="이 별칭들만 (쉼표로 여러 명, 조 무시)")
+    parser.add_argument("--group", choices=("auto", "A", "B", "all"), default="auto",
+                        help="auto: 월·수·금은 날짜로 A·B 번갈아, 다른 요일은 전원")
     args = parser.parse_args()
     try:
         return run(args)
@@ -245,6 +261,9 @@ if __name__ == "__main__":
         assert split_detail([1] * 5, [2]) == ([1] * 5, [2])
         assert split_detail([1], [2] * 9) == ([1], [2] * 5)
         assert split_detail([], [2] * 9) == ([], [2] * 6)
+        days = [date(2026, 10, d) for d in (5, 7, 9, 12, 14, 16)]  # 월수금 두 주
+        assert [group_of_day(d) for d in days] in (list("ABABAB"), list("BABABA"))
+        assert group_of_day(date(2026, 10, 6)) is None
         print("ok")
         raise SystemExit(0)
     raise SystemExit(main())
