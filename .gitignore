@@ -1,0 +1,6 @@
+# 키가 들어 있으므로 커밋하지 않는다
+.env
+__pycache__/
+*.pyc
+.venv/
+preview/

@@ -1,0 +1,65 @@
+# 가상 인물 5 · 장기 무주택 가점형 (실존 인물 아님)
+blog:
+  category: "장기 무주택 가점형 (서울)"
+  label: "장기 무주택"
+  intro: "서울 노원구에서 어머니를 모시고 사는 다섯 식구입니다. 무주택 기간과 통장 기간이 길어 가점제 일반공급을 노리고 있어요."
+  facts:
+    - "남편 52세 · 아내 50세 · 자녀 2명 · 어머니 부양(5인 가구)"
+    - "합산 연소득 1억 원(7,200 + 2,800)"
+    - "무주택 24년(2002년 결혼 후) · 청약통장 18년 · 220회 · 2,200만 원"
+    - "자동차 1대(2,000만 원) · 부동산 없음"
+    - "희망: 서울 + 경기 구리·남양주·의정부 · 30평대 · 예산 9억 원"
+  tags: [청약, 청약가점, 가점제, 무주택, 서울청약, 노부모부양, 일반공급, 내집마련]
+  publish_time: "20:30"
+
+applicant:
+  label: "남편"
+  birth_date: "1974-08-17"
+  annual_income: 72000000
+  address: "서울특별시 노원구"
+  region: "서울"
+  district: "노원구"
+  moved_in_date: "2012-03-01"
+  is_householder: true
+  homeless: true
+  homeless_since: "2002-05-11"
+  ever_owned_home: false
+  income_tax_years: 25
+  account: {type: "주택청약종합저축", opened_date: "2008-04-01", payment_count: 220, balance: 22000000, monthly_payment: 100000}
+  assets: {real_estate: 0, car: 20000000}
+  workplace: {name: null, query: null}
+
+spouse:
+  label: "아내"
+  birth_date: "1976-01-25"
+  annual_income: 28000000
+  address: "서울특별시 노원구"
+  region: "서울"
+  district: "노원구"
+  is_householder: false
+  homeless: true
+  ever_owned_home: false
+  income_tax_years: 10
+  account: {type: null, opened_date: null, payment_count: null, balance: null}
+  assets: {real_estate: 0, car: 0}
+  workplace: {name: null, query: null}
+
+household:
+  marriage_registered: true
+  marriage_date: "2002-05-11"
+  marriage_flexible: false
+  children: 2
+  household_size: 5
+  parents_dependents: 1
+
+filters:
+  regions: ["서울"]
+  city_regions: ["경기"]
+  cities:
+    경기: ["구리", "남양주", "의정부"]
+  area_ranges: [[73, 99.99]]
+  apartment_only: false
+  exclude_house_types: []
+  price_cap: null
+  budget: 900000000
+  lookback_days: 60

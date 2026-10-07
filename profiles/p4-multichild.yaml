@@ -1,0 +1,62 @@
+# 가상 인물 4 · 지방 다자녀 (실존 인물 아님)
+blog:
+  category: "지방 다자녀 (부산·경남·울산)"
+  label: "다자녀 가구"
+  intro: "부산 해운대구에 사는 다섯 식구입니다. 아이 셋이 크면서 방 3개 이상 집이 필요해 부산·경남·울산 공고를 보고 있어요."
+  facts:
+    - "남편 41세 · 아내 39세 · 결혼 14년 차 · 자녀 3명"
+    - "합산 연소득 7,000만 원(4,800 + 2,200)"
+    - "청약통장 남편 190회 · 아내 100회 · 결혼 후 쭉 무주택"
+    - "자동차 1대(1,800만 원) · 부동산 없음"
+    - "희망: 부산·경남·울산 · 30평대"
+  tags: [청약, 다자녀특공, 다자녀매입임대, 국민임대, 부산청약, 경남청약, 울산청약, 다자녀]
+  publish_time: "17:30"
+
+applicant:
+  label: "남편"
+  birth_date: "1985-05-30"
+  annual_income: 48000000
+  address: "부산광역시 해운대구"
+  region: "부산"
+  district: "해운대구"
+  moved_in_date: "2018-02-01"
+  is_householder: true
+  homeless: true
+  homeless_since: "2012-10-13"
+  ever_owned_home: false
+  income_tax_years: 15
+  account: {type: "주택청약종합저축", opened_date: "2010-03-01", payment_count: 190, balance: 19000000, monthly_payment: 100000}
+  assets: {real_estate: 0, car: 18000000}
+  workplace: {name: null, query: null}
+
+spouse:
+  label: "아내"
+  birth_date: "1987-03-02"
+  annual_income: 22000000
+  address: "부산광역시 해운대구"
+  region: "부산"
+  district: "해운대구"
+  is_householder: false
+  homeless: true
+  ever_owned_home: false
+  income_tax_years: 8
+  account: {type: "주택청약종합저축", opened_date: "2014-01-01", payment_count: 100, balance: 10000000}
+  assets: {real_estate: 0, car: 0}
+  workplace: {name: null, query: null}
+
+household:
+  marriage_registered: true
+  marriage_date: "2012-10-13"
+  marriage_flexible: false
+  children: 3
+  household_size: 5
+  parents_dependents: 0
+
+filters:
+  regions: ["부산", "경남", "울산"]
+  area_ranges: [[73, 99.99]]
+  apartment_only: false
+  exclude_house_types: []
+  price_cap: null
+  budget: 500000000
+  lookback_days: 60

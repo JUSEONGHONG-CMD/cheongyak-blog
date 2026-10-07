@@ -1,0 +1,61 @@
+# 가상 인물 3 · 신생아 가구 (실존 인물 아님)
+blog:
+  category: "신생아 가구 (인천·경기)"
+  label: "신생아 가구"
+  intro: "인천 서구에 사는 세 식구입니다. 올해 첫 아이가 태어나 아내는 육아휴직 중이고, 외벌이로 넣을 수 있는 공고를 찾고 있어요."
+  facts:
+    - "남편 34세 · 아내 32세 · 혼인신고 2023년 4월 · 자녀 1명(올해 출생)"
+    - "외벌이 연소득 5,500만 원 · 소득세 납부 8년"
+    - "청약통장 남편 110회 · 아내 70회"
+    - "자동차 1대(1,500만 원) · 부동산 없음 · 집을 가진 적 없음"
+    - "희망: 인천·경기 · 20~30평대"
+  tags: [청약, 신생아특공, 신생아매입임대, 생애최초, 인천청약, 경기청약, 신혼부부특공, 육아]
+  publish_time: "13:30"
+
+applicant:
+  label: "남편"
+  birth_date: "1992-09-03"
+  annual_income: 55000000
+  address: "인천광역시 서구"
+  region: "인천"
+  district: "서구"
+  moved_in_date: "2023-05-01"
+  is_householder: true
+  homeless: true
+  ever_owned_home: false
+  income_tax_years: 8
+  account: {type: "주택청약종합저축", opened_date: "2016-01-01", payment_count: 110, balance: 11000000, monthly_payment: 100000}
+  assets: {real_estate: 0, car: 15000000}
+  workplace: {name: null, query: null}
+
+spouse:
+  label: "아내"
+  birth_date: "1993-12-15"
+  annual_income: 0
+  address: "인천광역시 서구"
+  region: "인천"
+  district: "서구"
+  is_householder: false
+  homeless: true
+  ever_owned_home: false
+  income_tax_years: 4
+  account: {type: "주택청약종합저축", opened_date: "2019-01-01", payment_count: 70, balance: 7000000}
+  assets: {real_estate: 0, car: 0}
+  workplace: {name: null, query: null}
+
+household:
+  marriage_registered: true
+  marriage_date: "2023-04-08"
+  marriage_flexible: false
+  children: 1
+  household_size: 3
+  parents_dependents: 0
+
+filters:
+  regions: ["인천", "경기"]
+  area_ranges: [[50, 72.99], [73, 99.99]]
+  apartment_only: false
+  exclude_house_types: []
+  price_cap: null
+  budget: 550000000
+  lookback_days: 60
