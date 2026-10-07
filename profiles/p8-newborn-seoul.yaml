@@ -1,0 +1,65 @@
+# 가상 인물 8 · 서울 신생아 맞벌이 (실존 인물 아님)
+blog:
+  category: "신생아 맞벌이 (서울·경기 서부)"
+  label: "신생아 맞벌이"
+  intro: "서울 강서구에 사는 맞벌이 부부로, 5월에 첫 아이가 태어났습니다. 소득이 높아 신혼 특공이 빠듯해 신생아 특공과 생애최초를 함께 보고 있어요."
+  facts:
+    - "남편 33세 · 아내 32세 · 혼인신고 2024년 5월 · 자녀 1명(2026년 5월 출생)"
+    - "합산 연소득 1억 1,000만 원(6,000 + 5,000) · 소득세 납부 7년·6년"
+    - "청약통장 남편 80회 · 아내 70회"
+    - "부동산 없음 · 둘 다 집을 가진 적 없음"
+    - "희망: 서울 + 경기 광명·부천·고양·김포·하남 · 20~30평대 · 예산 8억 원"
+  tags: [청약, 신생아특공, 맞벌이청약, 생애최초, 서울청약, 뉴홈, 공공분양, 신혼부부]
+  publish_time: "15:30"
+
+applicant:
+  label: "남편"
+  birth_date: "1993-01-19"
+  annual_income: 60000000
+  address: "서울특별시 강서구"
+  region: "서울"
+  district: "강서구"
+  moved_in_date: "2024-06-01"
+  is_householder: true
+  homeless: true
+  ever_owned_home: false
+  income_tax_years: 7
+  account: {type: "주택청약종합저축", opened_date: "2019-10-01", payment_count: 80, balance: 8000000, monthly_payment: 100000}
+  assets: {real_estate: 0, car: 0}
+  workplace: {name: null, query: null}
+
+spouse:
+  label: "아내"
+  birth_date: "1994-04-07"
+  annual_income: 50000000
+  address: "서울특별시 강서구"
+  region: "서울"
+  district: "강서구"
+  is_householder: false
+  homeless: true
+  ever_owned_home: false
+  income_tax_years: 6
+  account: {type: "주택청약종합저축", opened_date: "2020-08-01", payment_count: 70, balance: 7000000}
+  assets: {real_estate: 0, car: 0}
+  workplace: {name: null, query: null}
+
+household:
+  marriage_registered: true
+  marriage_date: "2024-05-11"
+  marriage_flexible: false
+  children: 1
+  youngest_child_birth: "2026-05-20"
+  household_size: 3
+  parents_dependents: 0
+
+filters:
+  regions: ["서울"]
+  city_regions: ["경기"]
+  cities:
+    경기: ["광명", "부천", "고양", "김포", "하남"]
+  area_ranges: [[50, 72.99], [73, 99.99]]
+  apartment_only: false
+  exclude_house_types: []
+  price_cap: null
+  budget: 800000000
+  lookback_days: 60

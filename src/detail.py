@@ -337,7 +337,8 @@ def body(item: dict, verdict) -> list[str]:
     # 신청할 수 있는 '창구'를 나열한다. 이름만으로는 뜻이 안 통하는 제도 용어가
     # 많으므로, 각 창구 아래에 왜 되는지(또는 확인이 필요한지)를 한 줄로 붙인다.
     lines.append("⑨ 신청 가능한 방법")
-    for route in (verdict.possible or verdict.conditional):
+    # 블로그는 ❔ 도 함께 싣는다. 신생아·노부모 특공처럼 공고문 확인이 필요한 길이 그 인물의 핵심일 때가 많다
+    for route in verdict.possible + verdict.conditional:
         mark = "✅" if route.status == "가능" else "❔"
         lines.append(f"    {mark} {route.name}")
         lines.append(f"        └ {route.reason}")

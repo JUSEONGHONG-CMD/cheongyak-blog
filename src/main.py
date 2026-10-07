@@ -35,6 +35,8 @@ from .config import MissingKey, env, load_profiles
 from .state import SeenStore
 
 DETAIL_MAX = 6  # 글 하나에 자세히 쓰는 새 공고 수. 나머지는 한 줄 목록
+# 누구나 넣는 유형. 인물마다 다를 게 없어 상세 자리는 특공·일반공급 공고에 먼저 준다
+ANYONE = ("임의공급", "무순위", "오피스텔등", "공공지원민간임대")
 
 
 def applyhome_key(item: dict) -> str:
@@ -155,7 +157,7 @@ def run_one(alias, profile, args, keys, cache, today) -> bool:
     seen = SeenStore(alias)
     sale, verdicts, degraded = collect_sale(profile, keys, cache, today)
     leases = collect_lease(profile, keys, cache, today)
-    sale_new = [x for x in sale if seen.is_new(x)]
+    sale_new = sorted((x for x in sale if seen.is_new(x)), key=lambda x: x.get("category") in ANYONE)
     lease_new = [x for x in leases if seen.is_new(x)]
     print(f"      분양 {len(sale)}건(새 {len(sale_new)}) · 임대 {len(leases)}건(새 {len(lease_new)})")
     if not sale_new and not lease_new:
@@ -163,6 +165,8 @@ def run_one(alias, profile, args, keys, cache, today) -> bool:
         return True
 
     sale_show, lease_show = split_detail(sale_new, lease_new)
+    for number, x in enumerate(sale_show, 1):  # 순서를 바꿨으니 표의 # 도 다시 매긴다
+        x["rank"] = number
     shown = {id(x) for x in (*sale_show, *lease_show)}
     rest = [x for x in (*sale, *leases) if id(x) not in shown]
     issues = [*validate.check_data(sale_show, verdicts, applyhome_key, today, profile.get("filters") or {}),

@@ -48,6 +48,7 @@ household:
   marriage_date: "2023-04-08"
   marriage_flexible: false
   children: 1
+  youngest_child_birth: "2026-03-14" # 2년 이내 출생 → 신생아 특공
   household_size: 3
   parents_dependents: 0
 

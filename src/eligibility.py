@@ -388,6 +388,111 @@ def newlywed_routes(profile: dict, item: dict, married: bool, today: date | None
     return routes
 
 
+def _public_income(profile: dict, cap: int) -> Route | None:
+    """국민주택(공공분양) 특공 소득 기준. 충족이면 None."""
+    monthly = income_table.household_income(profile)
+    if not monthly:
+        return Route("", CONDITIONAL, f"소득 미입력 — 공공분양 소득 {cap}% 기준 확인")
+    size = int((profile.get("household") or {}).get("household_size") or 3)
+    ratio = income_table.income_ratio(monthly, size)
+    if ratio > cap:
+        return Route("", IMPOSSIBLE, f"가구 소득 {ratio:.0f}% · 공공분양 기준 {cap}% 초과")
+    return None
+
+
+def _special_base(profile: dict, item: dict, label: str, name: str, need: str) -> Route | None:
+    """특공 공통 관문: 물량·무주택·공공분양 소득(120%). 통과하면 None."""
+    if has_special_units(item, label) is False:
+        return Route(name, IMPOSSIBLE, f"이 공고에 {label} 물량 없음")
+    if (profile.get("applicant") or {}).get("homeless") is False:
+        return Route(name, IMPOSSIBLE, "무주택 세대구성원이어야 함")
+    if is_public_housing(item):
+        failed = _public_income(profile, 120)
+        if failed:
+            return Route(name, failed.status, f"{need} · {failed.reason}")
+    return None
+
+
+def multi_child_routes(profile: dict, item: dict) -> list[Route]:
+    """다자녀 특별공급. 2024-03 개정으로 미성년 자녀 2명 이상(태아·입양 포함).
+
+    민영은 소득 기준이 없고, 공공분양은 도시근로자 소득 120% 이하·자산 기준이 붙는다.
+    당첨은 배점제(자녀 수·영유아 수·무주택기간·거주기간·통장기간)라 점수는 공고문 표로 계산한다.
+    """
+    household = profile.get("household") or {}
+    minors = household.get("minor_children")
+    minors = int(household.get("children") or 0) if minors is None else int(minors)
+    if minors < 2:
+        return []  # 해당 없는 사람에게 '불가' 줄을 늘어놓지 않는다
+    name = "다자녀 특별공급"
+    need = f"미성년 자녀 {minors}명"
+    blocked = _special_base(profile, item, "다자녀", name, need)
+    if blocked:
+        return [blocked]
+    return [Route(name, POSSIBLE, f"{need} · 무주택 · 통장 6개월 이상이면 신청 · 배점제(자녀 수·무주택기간·거주기간)")]
+
+
+def elder_parent_routes(profile: dict, item: dict, today: date) -> list[Route]:
+    """노부모부양 특별공급. 만 65세 이상 직계존속을 3년 이상 같은 등본에서 부양한 무주택 세대주.
+
+    1순위 통장이 있어야 하고 가점제로 뽑는다. parents_dependents 는 '3년 이상 함께 산' 부모 수.
+    """
+    household = profile.get("household") or {}
+    if not int(household.get("parents_dependents") or 0):
+        return []
+    name = "노부모부양 특별공급"
+    need = "65세 이상 부모 3년 이상 부양"
+    blocked = _special_base(profile, item, "노부모부양", name, need)
+    if blocked:
+        return [blocked]
+    if (profile.get("applicant") or {}).get("is_householder") is False:
+        return [Route(name, IMPOSSIBLE, "세대주만 신청 가능")]
+    account = check_account(profile, item, today)
+    if account.status == IMPOSSIBLE:
+        return [Route(name, IMPOSSIBLE, f"1순위 통장 필요 — {account.reason}")]
+    score, _ = compute_gapjeom(profile, today, bool(household.get("marriage_registered")))
+    if household.get("elder_parent_65") is None:
+        return [Route(name, CONDITIONAL, f"부모님이 만 65세 이상이면 신청 · 가점 {score}점으로 경쟁")]
+    if not household.get("elder_parent_65"):
+        return [Route(name, IMPOSSIBLE, "부모님이 만 65세 미만")]
+    status = CONDITIONAL if account.status == CONDITIONAL else POSSIBLE
+    return [Route(name, status, f"{need} · 무주택 세대주 · 1순위 · 가점 {score}점으로 경쟁")]
+
+
+def newborn_routes(profile: dict, item: dict, today: date) -> list[Route]:
+    """신생아 특별공급. 공고일 기준 2년 이내 출생 자녀(임신 포함)가 있는 무주택 세대.
+
+    공공분양은 income_table 의 신생아특공 구간(우선·일반), 추첨은 소득 대신 자산만 본다.
+    민영은 물량만 확인하고 기준은 공고문으로 넘긴다.
+    """
+    household = profile.get("household") or {}
+    if not int(household.get("children") or 0) and not household.get("pregnant"):
+        return []
+    born = parse_date(household.get("youngest_child_birth"))
+    # 막내 생일을 모르면 다 큰 자녀일 수도 있어 싣지 않는다 (가상 인물은 늘 적는다)
+    if not household.get("pregnant") and (not born or months_between(born, today) >= 24):
+        return []
+    if has_special_units(item, "신생아") is False:
+        return []
+    if (profile.get("applicant") or {}).get("homeless") is False:
+        return [Route("신생아 특별공급", IMPOSSIBLE, "무주택 세대구성원이어야 함")]
+    when = "임신 중" if household.get("pregnant") else f"막내 생후 {months_between(born, today)}개월"
+    if not is_public_housing(item):
+        # 민영에도 청약홈이 신생아 물량(NWBB)을 따로 준다. 민영 소득 구간은 확인하지 못해 공고문으로 넘긴다.
+        _, _, ratio = income_status(profile, "신생아특공", "우선공급")
+        return [Route("신생아 특별공급", CONDITIONAL,
+                      f"{when} · 가구 소득 {ratio:.0f}% · 민영 소득·자산 기준은 공고문 확인")]
+    routes = []
+    for tier, label in (("우선공급", "우선"), ("일반공급", "일반"), ("추첨", "추첨")):
+        name = f"신생아 특별공급 ({label})"
+        if tier == "추첨":
+            status, reason = check_assets(profile)
+        else:
+            status, reason, _ = income_status(profile, "신생아특공", tier)
+        routes.append(Route(name, status, f"{when} · {reason}"))
+    return routes
+
+
 def first_time_routes(profile: dict, item: dict) -> list[Route]:
     """생애최초 특별공급.
 
@@ -404,6 +509,18 @@ def first_time_routes(profile: dict, item: dict) -> list[Route]:
     household = profile.get("household") or {}
     married = bool(household.get("marriage_registered"))
     children = int(household.get("children") or 0)
+    if not married and not children and not profile.get("spouse"):
+        # 1인 가구: 2021-11 부터 추첨 물량 중 전용 60㎡ 이하에만 신청 가능
+        me = profile.get("applicant") or {}
+        name = "생애최초 특별공급 (1인 가구 추첨)"
+        if me.get("ever_owned_home") is True:
+            return [Route(name, IMPOSSIBLE, "과거 주택 소유 이력 있음")]
+        if int(me.get("income_tax_years") or 0) < 5:
+            return [Route(name, IMPOSSIBLE, f"소득세 납부 {me.get('income_tax_years') or 0}년 (5년 필요)")]
+        areas = [m["area"] for m in (item.get("matched_models") or []) if m.get("area")]
+        if areas and min(areas) > 60:
+            return [Route(name, IMPOSSIBLE, "1인 가구는 전용 60㎡ 이하만 신청 가능")]
+        return [Route(name, CONDITIONAL, "1인 가구 · 추첨 물량·전용 60㎡ 이하만 · 소득·자산 기준은 공고문 확인")]
     if not married and not children:
         return [
             Route(
@@ -681,6 +798,9 @@ def evaluate(item: dict, profile: dict, today: date | None = None) -> Verdict:
         verdict.routes = [
             *newlywed_routes(profile, item, married, today),
             *first_time_routes(profile, item),
+            *newborn_routes(profile, item, today),
+            *multi_child_routes(profile, item),
+            *elder_parent_routes(profile, item, today),
             general_route(profile, item, today, married),
         ]
         verdict.account = check_account(profile, item, today)
@@ -714,3 +834,39 @@ def evaluate(item: dict, profile: dict, today: date | None = None) -> Verdict:
     _, _, ratio = income_status(profile, "신혼부부특공", "일반공급")
     verdict.income_ratio = ratio
     return verdict
+
+
+if __name__ == "__main__":
+    today = date(2026, 10, 7)
+    private = {"category": "APT", "house_type": "민영", "name": "x", "models": [1],
+               "special_counts": {"다자녀": 5, "노부모부양": 2}}
+    public = {**private, "house_type": "국민", "special_counts": {"신생아": 10, "다자녀": 3}}
+    base = {"applicant": {"homeless": True, "is_householder": True, "annual_income": 60_000_000,
+                          "account": {"opened_date": "2015-01-01", "balance": 20_000_000, "payment_count": 100}},
+            "spouse": {"annual_income": 0}}
+    two = {**base, "household": {"children": 2, "household_size": 4, "marriage_registered": True}}
+    assert [r.status for r in multi_child_routes(two, private)] == [POSSIBLE]
+    assert multi_child_routes({**base, "household": {"children": 1}}, private) == []
+    assert multi_child_routes({**base, "household": {"children": 2, "minor_children": 1}}, private) == []
+    rich = {**two, "applicant": {**base["applicant"], "annual_income": 200_000_000}}
+    assert multi_child_routes(rich, private)[0].status == POSSIBLE      # 민영: 소득 무관
+    assert multi_child_routes(rich, public)[0].status == IMPOSSIBLE     # 공공: 120% 초과
+    elder = {**base, "household": {"parents_dependents": 1, "elder_parent_65": True, "household_size": 3}}
+    assert elder_parent_routes(elder, private, today)[0].status == POSSIBLE
+    not_head = {**elder, "applicant": {**base["applicant"], "is_householder": False}}
+    assert elder_parent_routes(not_head, private, today)[0].status == IMPOSSIBLE
+    assert elder_parent_routes({**base, "household": {}}, private, today) == []
+    baby = {**base, "household": {"children": 1, "household_size": 3, "youngest_child_birth": "2026-03-01"}}
+    assert newborn_routes(baby, public, today)[0].name == "신생아 특별공급 (우선)"
+    assert newborn_routes(baby, private, today) == []                   # 이 공고엔 신생아 물량 없음
+    with_nwbb = {**private, "special_counts": {"신생아": 7}}
+    assert [(r.name, r.status) for r in newborn_routes(baby, with_nwbb, today)] == [("신생아 특별공급", CONDITIONAL)]
+    old = {**base, "household": {"children": 1, "youngest_child_birth": "2023-01-01"}}
+    assert newborn_routes(old, public, today) == []
+    married_long = {"household": {"marriage_registered": True, "marriage_date": "2012-01-01"}}
+    assert over_seven_years(married_long, today) and not over_seven_years({"household": {}}, today)
+    single = {"applicant": {"income_tax_years": 9, "ever_owned_home": False}, "household": {}}
+    small = {**private, "special_counts": {"생애최초": 3}, "matched_models": [{"area": 59.9}]}
+    assert first_time_routes(single, small)[0].status == CONDITIONAL
+    assert first_time_routes(single, {**small, "matched_models": [{"area": 84.9}]})[0].status == IMPOSSIBLE
+    print("ok")

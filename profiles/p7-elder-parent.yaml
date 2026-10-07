@@ -1,0 +1,67 @@
+# 가상 인물 7 · 노부모 부양 (실존 인물 아님)
+blog:
+  category: "노부모 부양 가구 (서울·경기 북부)"
+  label: "노부모 부양"
+  intro: "서울 은평구에서 72세 어머니를 5년째 모시고 사는 40대 세대주입니다. 노부모부양 특별공급으로 경쟁을 줄여 보려 해요."
+  facts:
+    - "남편 45세(세대주) · 아내 43세 · 자녀 1명(중학생) · 어머니(72세) 5년째 같은 등본"
+    - "합산 연소득 8,000만 원(5,500 + 2,500)"
+    - "청약통장 16년 · 200회 · 2,000만 원 · 무주택 14년"
+    - "자동차 1대(1,500만 원) · 부동산 없음"
+    - "희망: 서울 + 경기 고양·파주 · 30평대 · 예산 8억 원"
+  tags: [청약, 노부모부양특공, 노부모부양, 서울청약, 고양청약, 파주청약, 무주택세대주, 내집마련]
+  publish_time: "12:30"
+
+applicant:
+  label: "남편"
+  birth_date: "1981-03-28"
+  annual_income: 55000000
+  address: "서울특별시 은평구"
+  region: "서울"
+  district: "은평구"
+  moved_in_date: "2017-04-01"
+  is_householder: true
+  homeless: true
+  homeless_since: "2012-09-15"
+  ever_owned_home: false
+  income_tax_years: 18
+  account: {type: "주택청약종합저축", opened_date: "2010-01-01", payment_count: 200, balance: 20000000, monthly_payment: 100000}
+  assets: {real_estate: 0, car: 15000000}
+  workplace: {name: null, query: null}
+
+spouse:
+  label: "아내"
+  birth_date: "1983-11-02"
+  annual_income: 25000000
+  address: "서울특별시 은평구"
+  region: "서울"
+  district: "은평구"
+  is_householder: false
+  homeless: true
+  ever_owned_home: false
+  income_tax_years: 10
+  account: {type: null, opened_date: null, payment_count: null, balance: null}
+  assets: {real_estate: 0, car: 0}
+  workplace: {name: null, query: null}
+
+household:
+  marriage_registered: true
+  marriage_date: "2012-09-15"
+  marriage_flexible: false
+  children: 1
+  minor_children: 1
+  household_size: 4
+  parents_dependents: 1
+  elder_parent_65: true
+
+filters:
+  regions: ["서울"]
+  city_regions: ["경기"]
+  cities:
+    경기: ["고양", "파주"]
+  area_ranges: [[73, 99.99]]
+  apartment_only: false
+  exclude_house_types: []
+  price_cap: null
+  budget: 800000000
+  lookback_days: 60

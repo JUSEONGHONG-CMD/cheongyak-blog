@@ -295,14 +295,12 @@ def build_html(
 
     # ── 한눈에 보는 표 ─────────────────────────────
     out.append("<table style='border-collapse:collapse;width:100%;margin-bottom:24px'><tr>")
-    for head in ("#", "단지", "마감", "통근 🚌/🚗", "분양가", "시세 대비", "신청 가능"):
+    for head in ("#", "단지", "마감", "분양가", "시세 대비", "신청 가능"):
         out.append(f"<th style='{TH}'>{head}</th>")
     out.append("</tr>")
 
     for item in items:
         verdict = verdicts.get(key_of(item))
-        transit = sum(v for v in (item.get("commute") or {}).values() if v < 999)
-        car = sum(v for v in (item.get("commute_car") or {}).values() if v < 999)
         flag = "🔴" if item.get("urgent") else ("🆕" if item.get("is_new") else "")
         url = escape((item.get("url") or "").strip())
         name = escape(str(item.get("name", "")))
@@ -313,7 +311,6 @@ def build_html(
             f"<br><span style='color:#888;font-size:11px'>{escape(str(item.get('area_name') or ''))}"
             f" · {escape(str(item.get('category')))}</span></td>"
             f"<td style='{TD}'>{_dday(item)}</td>"
-            f"<td style='{TD}'>{transit or '-'} / {car or '-'}</td>"
             f"<td style='{TD}'>{detail.price_span(item) or '-'}</td>"
             f"<td style='{TD}'>{_market_cell(item)}</td>"
             f"<td style='{TD};font-size:12px'>{_routes_cell(verdict) if verdict else '-'}</td>"

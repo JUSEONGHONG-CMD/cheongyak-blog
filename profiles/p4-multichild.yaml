@@ -49,6 +49,7 @@ household:
   marriage_date: "2012-10-13"
   marriage_flexible: false
   children: 3
+  minor_children: 3 # 미성년 자녀 수 → 다자녀 특공(2명 이상)
   household_size: 5
   parents_dependents: 0
 

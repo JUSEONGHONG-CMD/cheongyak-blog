@@ -1,0 +1,45 @@
+# 가상 인물 10 · 지방 30대 1인 (실존 인물 아님)
+blog:
+  category: "30대 1인 가구 (대전·세종·충남)"
+  label: "30대 1인"
+  intro: "대전 유성구에 혼자 사는 36세 직장인입니다. 청년 나이는 지났지만, 1인 가구 생애최초 추첨과 일반공급 추첨으로 첫 집을 노리고 있어요."
+  facts:
+    - "만 36세 · 미혼 · 1인 가구 세대주 · 무주택"
+    - "연봉 4,800만 원 · 소득세 납부 9년 (생애최초 요건 충족)"
+    - "청약통장 10년 · 120회 · 1,200만 원"
+    - "자동차 1대(1,200만 원) · 부동산 없음"
+    - "희망: 대전·세종·충남 · 20평대 이하"
+  tags: [청약, 1인가구청약, 생애최초, 추첨제, 대전청약, 세종청약, 충남청약, 싱글]
+  publish_time: "19:30"
+
+applicant:
+  label: "본인"
+  birth_date: "1990-01-08"
+  annual_income: 48000000
+  address: "대전광역시 유성구"
+  region: "대전"
+  district: "유성구"
+  moved_in_date: "2018-07-01"
+  is_householder: true
+  homeless: true
+  ever_owned_home: false
+  income_tax_years: 9
+  parents_homeless: false
+  account: {type: "주택청약종합저축", opened_date: "2016-09-01", payment_count: 120, balance: 12000000, monthly_payment: 100000}
+  assets: {real_estate: 0, car: 12000000}
+  workplace: {name: null, query: null}
+
+household:
+  marriage_registered: false
+  children: 0
+  household_size: 1
+  parents_dependents: 0
+
+filters:
+  regions: ["대전", "세종", "충남"]
+  area_ranges: [[0, 49.99], [50, 72.99]]
+  apartment_only: false
+  exclude_house_types: []
+  price_cap: null
+  budget: 450000000
+  lookback_days: 60

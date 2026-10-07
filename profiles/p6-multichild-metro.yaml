@@ -1,0 +1,64 @@
+# 가상 인물 6 · 수도권 두 자녀 (실존 인물 아님)
+blog:
+  category: "두 자녀 가구 (경기)"
+  label: "두 자녀 가구"
+  intro: "경기 화성 동탄에 사는 네 식구입니다. 2024년부터 자녀 2명도 다자녀 특별공급 대상이 되면서 30평대로 옮길 기회를 보고 있어요."
+  facts:
+    - "남편 38세 · 아내 36세 · 결혼 10년 차 · 자녀 2명(7세·3세)"
+    - "합산 연소득 7,700만 원(6,500 + 1,200)"
+    - "청약통장 남편 150회 · 1,500만 원 · 결혼 후 쭉 무주택"
+    - "자동차 1대(2,200만 원) · 부동산 없음"
+    - "희망: 경기 전역 · 30평대 · 예산 6억 원"
+  tags: [청약, 다자녀특공, 두자녀, 다자녀청약, 경기청약, 동탄청약, 30평대, 내집마련]
+  publish_time: "09:30"
+
+applicant:
+  label: "남편"
+  birth_date: "1988-02-14"
+  annual_income: 65000000
+  address: "경기도 화성시"
+  region: "경기"
+  district: "화성시"
+  moved_in_date: "2019-08-01"
+  is_householder: true
+  homeless: true
+  homeless_since: "2016-05-21"
+  ever_owned_home: false
+  income_tax_years: 12
+  account: {type: "주택청약종합저축", opened_date: "2013-06-01", payment_count: 150, balance: 15000000, monthly_payment: 100000}
+  assets: {real_estate: 0, car: 22000000}
+  workplace: {name: null, query: null}
+
+spouse:
+  label: "아내"
+  birth_date: "1990-07-09"
+  annual_income: 12000000
+  address: "경기도 화성시"
+  region: "경기"
+  district: "화성시"
+  is_householder: false
+  homeless: true
+  ever_owned_home: false
+  income_tax_years: 7
+  account: {type: null, opened_date: null, payment_count: null, balance: null}
+  assets: {real_estate: 0, car: 0}
+  workplace: {name: null, query: null}
+
+household:
+  marriage_registered: true
+  marriage_date: "2016-05-21"
+  marriage_flexible: false
+  children: 2
+  minor_children: 2
+  youngest_child_birth: "2023-06-02"
+  household_size: 4
+  parents_dependents: 0
+
+filters:
+  regions: ["경기"]
+  area_ranges: [[73, 99.99]]
+  apartment_only: false
+  exclude_house_types: []
+  price_cap: null
+  budget: 600000000
+  lookback_days: 60
