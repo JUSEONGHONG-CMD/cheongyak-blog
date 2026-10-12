@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 import traceback
 from datetime import date
@@ -133,6 +134,51 @@ def build_post(blog: dict, sale_show, verdicts, degraded, lease_show, rest, coun
     return "".join(out)
 
 
+TAG_MAX = 20  # 네이버 태그 상한은 30개. 너무 많으면 광고성으로 보여 20개로 묶는다
+
+
+def compact(name: str) -> str:
+    """태그용 단지명: 괄호 속과 공백·기호를 뺀다. '인천계양 A17블록 신혼희망타운(공공분양)' → '인천계양A17블록신혼희망타운'."""
+    return re.sub(r"[^0-9A-Za-z가-힣]", "", re.sub(r"\([^)]*\)", "", str(name)))
+
+
+def town(address: str) -> str:
+    """주소의 시·군·구 이름(접미사 뺌). '인천광역시 부평구 산곡동' → '부평'."""
+    parts = str(address).split()
+    if parts and parts[0].endswith("특별자치시"):  # 세종은 시·군·구가 없다
+        return parts[0].removesuffix("특별자치시")
+    return re.sub(r"(시|군|구)$", "", parts[1]) if len(parts) > 1 else ""
+
+
+def best_route(verdict) -> str:
+    """제목에 쓸 대표 신청 방법: 특공이 있으면 특공, 없으면 첫 경로."""
+    routes = (verdict.possible + verdict.conditional) if verdict else []
+    names = [notify_email.short_route(r.name) for r in routes]
+    return next((n for n in names if "특공" in n), names[0] if names else "")
+
+
+def post_title(blog: dict, top: dict, route: str, count: int, today: date) -> str:
+    """네이버는 제목 앞쪽 단어를 검색에 크게 본다. 사람들이 찾는 단지명·전형을 앞에 둔다."""
+    name = re.sub(r"\s*\([^)]*\)", "", str(top["name"])).strip()[:28]
+    what = route if "특공" in route else "청약"  # '오피스텔 오피스텔 청약'처럼 단지명과 겹치지 않게
+    return f"{name} {what} 자격 — {blog['label']} 기준 새 공고 {count}건 ({today.month}/{today.day})"
+
+
+def post_tags(blog: dict, sale_show: list, lease_show: list, verdicts: dict, today: date) -> list[str]:
+    """인물 고정 태그 + 이번 글의 단지명·동네·전형·달. 검색은 '단지명', '부평 청약'처럼 들어온다."""
+    tags = list(blog.get("tags") or [])[:6]
+    for x in sale_show:
+        tags.append(compact(x["name"]))
+        if town(x.get("address")):
+            tags.append(f"{town(x['address'])}청약")
+        route = best_route(verdicts.get(applyhome_key(x)))
+        if route:
+            tags.append(route.replace(" ", "").replace("❔", ""))
+    tags += [x["kind"].split("(")[0].replace("·", "") for x in lease_show]
+    tags += [f"{today.month}월청약", "청약자격", "청약공고"]
+    return [t for t in dict.fromkeys(tags) if t][:TAG_MAX]
+
+
 def build_mail(blog: dict, title: str, tags: list[str], issues: list, post: str) -> str:
     """운영자용 메일: 위에는 발행 정보, 구분선 아래는 그대로 복사할 본문."""
     notes = "<br>".join(escape(str(i)) for i in issues) or "없음"
@@ -144,7 +190,7 @@ def build_mail(blog: dict, title: str, tags: list[str], issues: list, post: str)
         "font-size:13px;margin-bottom:12px'>"
         + row.format("카테고리", escape(blog["category"]))
         + row.format("제목", f"<b>{escape(title)}</b>")
-        + row.format("태그", escape(" ".join(f"#{t}" for t in tags)))
+        + row.format("태그 (입력란에 붙여넣기)", f"<b>{escape(', '.join(tags))}</b>")
         + row.format("예약 발행", escape(blog.get("publish_time") or "-"))
         + row.format("검증 메모", notes)
         + "</table><p style='color:#c33;font-size:13px'>▼ 아래 선부터 끝까지 복사해 스마트에디터에 붙여 넣으세요 ▼</p>"
@@ -182,9 +228,12 @@ def run_one(alias, profile, args, keys, cache, today) -> str | None:
     post = build_post(blog, sale_show, verdicts, degraded, lease_show, rest, count, today, images)
     issues += validate.check_output(sale_show, post, images)
 
-    top = (sale_show or lease_show)[0]["name"]
-    title = f"[{blog['label']}] {today:%m/%d} 새 청약 공고 {count}건 — {str(top)[:30]}"
-    tags = list(dict.fromkeys([*(blog.get("tags") or []), *(x["kind"].split("(")[0] for x in lease_show)]))
+    top = (sale_show or lease_show)[0]
+    route = best_route(verdicts.get(applyhome_key(top))) if sale_show else top["kind"].split("(")[0]
+    title = post_title(blog, top, route, count, today)
+    tags = post_tags(blog, sale_show, lease_show, verdicts, today)
+    # 본문 끝 해시태그: 본문을 복사하면 함께 따라간다
+    post += f"<p style='color:#06c;font-size:13px'>{escape(' '.join(f'#{t}' for t in tags))}</p>"
     mail = build_mail(blog, title, tags, issues, post)
 
     if args.preview:
@@ -263,6 +312,9 @@ if __name__ == "__main__":
         assert split_detail([1] * 5, [2]) == ([1] * 5, [2])
         assert split_detail([1], [2] * 9) == ([1], [2] * 5)
         assert split_detail([], [2] * 9) == ([], [2] * 6)
+        assert compact("인천계양 A17블록 신혼희망타운(공공분양)(본청약)") == "인천계양A17블록신혼희망타운"
+        assert town("인천광역시 부평구 산곡동 10번지") == "부평" and town("경기도 수원시 영통구") == "수원"
+        assert town("세종특별자치시 산울동") == "세종"
         print("ok")
         raise SystemExit(0)
     raise SystemExit(main())

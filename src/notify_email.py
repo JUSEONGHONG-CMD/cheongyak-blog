@@ -213,11 +213,6 @@ def link_bar(item: dict, today) -> str:
 
 
 SECTION = re.compile(r"^([①-⑳])\s*(.+?)(?:\s{2,}(.*))?$")
-LABEL_TD = (
-    "padding:7px 10px;border-bottom:1px solid #eee;background:#f6f8fa;font-size:12px;"
-    "font-weight:600;color:#444;white-space:nowrap;vertical-align:top;width:84px"
-)
-VALUE_TD = "padding:7px 10px;border-bottom:1px solid #eee;font-size:13px;line-height:1.6"
 
 
 def detail_table(lines: list[str], extra: dict[str, str] | None = None) -> str:
@@ -248,17 +243,14 @@ def detail_table(lines: list[str], extra: dict[str, str] | None = None) -> str:
         parts = []
         for indent, text in content:
             sub = indent > base and indent != 0
-            style = "padding-left:14px;color:#666;font-size:12px" if sub else ""
-            parts.append(f"<div style='{style}'>{escape(text)}</div>")
+            style = "margin:0 0 0 14px;color:#666;font-size:12px" if sub else "margin:0;font-size:14px"
+            parts.append(f"<p style='{style}'>{escape(text)}</p>")
         rows.append(
-            f"<tr><td width='18%' style='{LABEL_TD}'>{escape(label)}</td>"
-            f"<td style='{VALUE_TD}'>{''.join(parts)}{extra.get(label, '')}</td></tr>"
+            f"<p style='margin:12px 0 2px;font-size:14px'><b>▪ {escape(label)}</b></p>"
+            f"{''.join(parts)}{extra.get(label, '')}"
         )
-    return (
-        "<table width='100%' cellpadding='0' cellspacing='0' "
-        "style='border-collapse:collapse;width:100%;border-top:1px solid #eee'>"
-        + "".join(rows) + "</table>"
-    )
+    # 블로그는 표 대신 문단으로 쓴다. 네이버 에디터가 붙여넣은 2칸 표의 너비를 제멋대로 다시 잡는다
+    return "<div>" + "".join(rows) + "</div>"
 
 
 def build_html(

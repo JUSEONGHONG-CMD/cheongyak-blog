@@ -630,8 +630,6 @@ def _dday(deadline: date, today: date) -> str:
 
 
 def html_section(leases: list[dict], today: date) -> str:
-    th = "padding:6px 10px;border-bottom:2px solid #ccc;font-size:12px;text-align:left;color:#555"
-    td = "padding:6px 10px;border-bottom:1px solid #eee;font-size:13px;vertical-align:top"
     small = "color:#888;font-size:11px"
 
     def houses(x: dict) -> str:
@@ -646,34 +644,27 @@ def html_section(leases: list[dict], today: date) -> str:
               if x.get("complex") else
               f"<span style='{small}'>주택목록을 읽지 못했습니다. 공고에서 확인하세요.</span>")
 
+    # 블로그는 표 대신 공고별 문단. 네이버 에디터에 붙이면 5칸 표의 너비가 깨진다
     rows = "".join(
-        f"<tr><td style='{td}'><b>{escape(x['kind'])}</b><br>"
-        f"<span style='{small}'>{escape(x.get('track') or '')}</span></td>"
-        f"<td style='{td}'><a href='{escape(x['url'])}' style='color:#06c;text-decoration:none'>"
-        f"{escape(x['name'])}</a><br><span style='{small}'>{escape(x['region'])}"
-        f"{' · %d호' % x['houses'] if x.get('houses') else ''}</span></td>"
-        f"<td style='{td}'>{houses(x)}</td>"
-        f"<td style='{td};white-space:nowrap'>{x['deadline']:%m.%d}<br>"
-        f"<span style='{small}'>{_dday(x['deadline'], today)}</span></td>"
-        f"<td style='{td}'>{escape(move_in(x))}</td></tr>"
+        f"<p style='margin:16px 0 2px;font-size:14px'><b>{escape(x['kind'])}</b> · "
+        f"<a href='{escape(x['url'])}' style='color:#06c;text-decoration:none'>{escape(x['name'])}</a></p>"
+        f"<p style='margin:0;{small}'>{escape(x['region'])}"
+        f"{' · %d호' % x['houses'] if x.get('houses') else ''} · 마감 {x['deadline']:%m.%d}"
+        f" ({_dday(x['deadline'], today)}) · {escape(move_in(x))}</p>"
+        + (f"<p style='margin:0;{small}'>{escape(x['track'])}</p>" if x.get("track") else "")
+        + f"<div style='margin-top:4px;font-size:13px'>{houses(x)}</div>"
         for x in leases
-    ) or f"<tr><td colspan='5' style='{td}'>접수 중인 공고가 없습니다.</td></tr>"
+    ) or "<p>접수 중인 공고가 없습니다.</p>"
     workplaces = _workplaces(leases)
     order = "통근 가까운 순" if workplaces else "마감 순, 보증금 낮은 집부터"
-    houses_head = (f"통근 가까운 집 (🚌대중교통 🚗자동차, {escape(workplaces)} 분)"
-                   if workplaces else "보증금 낮은 집")
     return (
         "<h2 style='margin:28px 0 4px'>🏘 LH 임대 (전세·월세)</h2>"
         "<p style='margin:0 0 10px;color:#666;font-size:13px'>LH · 접수 중 "
         f"{len(leases)}건 · {order} · LH 임대 전 유형 중 신청 가능(✅)·확인 필요(❔)한 것만. "
         "총자산은 예금 등 금융자산까지 합한 기준이니 공고문으로 확인하세요</p>"
-        "<table width='100%' style='border-collapse:collapse;width:100%;margin-bottom:24px'><tr>"
-        f"<th width='22%' style='{th}'>전형 · 신청 순위</th><th width='26%' style='{th}'>공고</th>"
-        f"<th width='30%' style='{th}'>{houses_head}</th>"
-        f"<th width='9%' style='{th}'>마감</th><th width='13%' style='{th}'>입주 시기</th></tr>"
-        f"{rows}</table>"
-        f"<p style='margin:-16px 0 24px;color:#666;font-size:12px'>💰 {escape(COST_NOTE)}</p>"
-        + (f"<p style='margin:-16px 0 24px;color:#b45309;font-size:12px'>{escape(leases[0]['warning'])}</p>"
+        f"{rows}"
+        f"<p style='margin:16px 0 4px;color:#666;font-size:12px'>💰 {escape(COST_NOTE)}</p>"
+        + (f"<p style='margin:0 0 24px;color:#b45309;font-size:12px'>{escape(leases[0]['warning'])}</p>"
            if leases and leases[0].get("warning") else "")
     )
 
