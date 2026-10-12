@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import os
 import re
 import sys
@@ -335,6 +334,7 @@ CHECKLIST = (
         "썸네일: 카드가 첫 이미지, 대표 이미지로 지정",
         "검증 메모: '없음'이거나, 빨간 칸이면 공고문 확인 끝냄",
         "맞춤법: 붙여넣은 뒤 에디터의 맞춤법 검사 한 번 (직접 덧붙인 문장 포함)",
+        "사진: 📷 자리마다 첨부 사진을 넣고 자리 표시 줄을 모두 지움",
         "이미지: 발행 후 휴대폰 네이버 앱에서 썸네일·그래프가 보이는지 확인",
         "본문: 표·이미지·링크 깨짐 없음",
         "안내 문구: '가상 인물 · 판정은 참고용'이 맨 끝에 남아 있음",
@@ -345,13 +345,17 @@ CHECKLIST = (
 )
 
 
-def downloads(title: str, label: str, post: str, images: dict[str, bytes]) -> list[tuple[str, bytes, str]]:
-    """네이버에 이미지가 실제로 올라가게 하는 첨부 파일.
+SLOT = ("<p style='border:2px dashed #3168f5;border-radius:6px;padding:10px 12px;color:#3168f5;"
+        "font-weight:bold;font-size:14px'>📷 사진 넣을 자리: {name} (사진 버튼으로 넣은 뒤 이 줄 지우기)</p>")
 
-    Gmail 웹에서 본문을 복사하면 이미지가 Gmail 로그인 전용 주소(mail.google.com/…attid=…)로 붙어,
-    PC 에서만 보이고 모바일 앱·다른 방문자에게는 안 보인다(2026-10-13 확인).
-    그래서 ① 이미지를 파일 안에 담은 원고 HTML(브라우저로 열어 복사·붙여넣기)과
-    ② 본문 순서대로 번호를 붙인 이미지 파일(사진 버튼으로 넣기)을 함께 보낸다.
+
+def photo_slots(post: str, images: dict[str, bytes]) -> tuple[str, list[tuple[str, bytes, str]]]:
+    """본문의 이미지를 '사진 넣을 자리' 표시로 바꾸고, 번호 붙인 PNG 첨부 목록을 만든다.
+
+    네이버 에디터는 복사한 본문 속 이미지를 사진으로 올리지 못한다. Gmail 에서 복사하면 Gmail 로그인
+    전용 주소나 파일로 붙어 모바일·방문자에게 안 보이고(2026-10-13), 이미지를 data URI 로 담은 원고 HTML 도
+    사진으로 들어가지 않았다. 사진 파일(캡처 포함)을 직접 넣으면 들어간다. 그래서 본문에는 자리만 표시하고
+    사진은 첨부 파일로 넣게 한다.
     """
     order = list(dict.fromkeys(re.findall(r"cid:([^'\"]+)", post)))
     files = []
@@ -360,16 +364,13 @@ def downloads(title: str, label: str, post: str, images: dict[str, bytes]) -> li
             name = "썸네일"
         else:  # 그래프 바로 앞의 공고 카드 제목(h3)이 그 그래프의 단지
             head = re.findall(r"<h3[^>]*>(.*?)</h3>", post[: post.find(f"cid:{cid}")], re.S)
-            name = "시세그래프_" + (compact(re.sub(r"<[^>]+>", "", head[-1]))[:20] if head else "")
-        files.append((f"{number:02d}_{name}.png", images[cid], "image/png"))
-    standalone = post
-    for cid in order:
-        data = base64.b64encode(images[cid]).decode()
-        standalone = standalone.replace(f"cid:{cid}", f"data:image/png;base64,{data}")
-    page = (f"<!doctype html><html><head><meta charset='utf-8'><title>{escape(title)}</title></head>"
-            "<body style='font-family:-apple-system,\"Malgun Gothic\",sans-serif;max-width:900px;"
-            f"margin:0 auto;padding:16px;color:#222'>{standalone}</body></html>")
-    return [(f"원고_{label}.html", page.encode("utf-8"), "text/html"), *files]
+            # 카드 제목 '🔴 마감임박 1. 쌍용 더 플래티넘 한강' 에서 순번 앞부분을 떼고 단지명만
+            title = re.sub(r"^.*?\d+\.\s*", "", re.sub(r"<[^>]+>", "", head[-1]).strip()) if head else ""
+            name = "시세그래프_" + compact(title)[:20]
+        filename = f"{number:02d}_{name}.png"
+        files.append((filename, images[cid], "image/png"))
+        post = re.sub(rf"<img[^>]*cid:{re.escape(cid)}[^>]*>", SLOT.format(name=escape(filename)), post)
+    return post, files
 
 
 def build_mail(blog: dict, title: str, tags: list[str], issues: list, post: str) -> str:
@@ -385,14 +386,13 @@ def build_mail(blog: dict, title: str, tags: list[str], issues: list, post: str)
         + row.format("제목", f"<b>{escape(title)}</b>")
         + row.format("태그 (입력란에 붙여넣기)", f"<b>{escape(', '.join(tags))}</b>")
         + row.format("예약 발행", escape(blog.get("publish_time") or "-"))
-        + row.format("이미지", "<b>아래 본문을 복사하면 이미지가 Gmail 주소로 붙어 모바일·방문자에게 안 보입니다.</b><br>"
-                     "① 첨부 <b>원고_….html</b>을 PC 브라우저로 열어 전체 선택 → 복사 → 붙여넣기 (이미지까지 올라감)<br>"
-                     "② 이미지가 빠지면 첨부 <b>01_썸네일 · 02_시세그래프…</b>를 번호 순서대로 사진 버튼으로 넣기")
+        + row.format("사진", "본문의 <b>📷 사진 넣을 자리</b>마다 첨부 <b>01_썸네일 · 02_시세그래프…</b>를 "
+                     "사진 버튼으로 넣고 그 줄을 지우세요. 복사한 본문 속 이미지는 네이버에 사진으로 올라가지 않습니다.")
         + (row.format("검증 메모", notes) if not issues else
            "<tr><td style='padding:4px 10px;color:#c33'><b>검증 메모</b></td>"
            f"<td style='padding:4px 10px;background:#fde8e8;color:#c33'><b>{notes}</b></td></tr>")
         + "</table>" + CHECKLIST
-        + "<p style='color:#c33;font-size:13px'>▼ 아래는 미리보기입니다. 붙여넣기는 첨부한 원고_….html 파일로 하세요 (이미지 때문) ▼</p>"
+        + "<p style='color:#c33;font-size:13px'>▼ 아래 선부터 끝까지 복사해 스마트에디터에 붙여 넣으세요 ▼</p>"
         "<hr>" + post + "</body></html>"
     )
 
@@ -442,21 +442,20 @@ def run_one(alias, profile, args, keys, cache, today) -> str | None:
     tags = post_tags(blog, sale_show, lease_show, verdicts, today)
     # 본문 끝 해시태그: 본문을 복사하면 함께 따라간다
     post += f"<p style='color:#06c;font-size:13px'>{escape(' '.join(f'#{t}' for t in tags))}</p>"
+    post, files = photo_slots(post, images)
     mail = build_mail(blog, title, tags, issues, post)
 
     if args.preview:
         path = Path(args.preview) / f"{alias}.html"
         path.parent.mkdir(parents=True, exist_ok=True)
-        for cid, png in images.items():
-            (path.parent / f"{cid.split('@')[0]}.png").write_bytes(png)
-            mail = mail.replace(f"cid:{cid}", f"{cid.split('@')[0]}.png")
+        for filename, data, _ in files:
+            (path.parent / f"{alias}_{filename}").write_bytes(data)
         path.write_text(mail, encoding="utf-8")
         print(f"      미리보기: {path.resolve()}")
         return "sent"
     to = {"notify": {"email": {"to": [env("BLOG_TO", required=False) or env("GMAIL_ADDRESS")]}}}
     tag = "[시험] " if args.test else ""
-    files = downloads(title, blog["label"].replace(" ", ""), post, images)
-    if not notify_email.send(to, mail, today, images, subject=f"{tag}[블로그 원고] {title}", attachments=files):
+    if not notify_email.send(to, mail, today, {}, subject=f"{tag}[블로그 원고] {title}", attachments=files):
         return None
     if args.test:  # 시험 발송은 기록을 남기지 않아 같은 공고가 실제 원고에 그대로 나간다
         return "sent"
