@@ -355,7 +355,7 @@ def build_html(
 
 def send(
     profile: dict, html: str, today, images: dict[str, bytes] | None = None,
-    subject: str | None = None,
+    subject: str | None = None, attachments: list[tuple[str, bytes, str]] | None = None,
 ) -> bool:
     """설정된 주소로 보고서를 보낸다. 보냈으면 True.
 
@@ -400,6 +400,10 @@ def send(
     html_part = message.get_payload()[1]
     for cid, png in (images or {}).items():
         html_part.add_related(png, "image", "png", cid=f"<{cid}>")
+    # 내려받을 파일(블로그 원고 HTML·이미지). (파일 이름, 내용, MIME) 목록
+    for name, data, mime in attachments or []:
+        maintype, subtype = mime.split("/")
+        message.add_attachment(data, maintype=maintype, subtype=subtype, filename=name)
 
     try:
         # 기본값은 PC 이름인데, 한글 이름이면 EHLO 에서 ascii 인코딩 오류가 난다
