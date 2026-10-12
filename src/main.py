@@ -161,24 +161,51 @@ def days_left(item: dict, today: date) -> int:
     return item["days_left"] if item.get("days_left") is not None else 999
 
 
-def card_text(blog: dict, sale_show, lease_show, verdicts, count: int, today: date) -> tuple[str, ...]:
-    """썸네일 카드 문구 (상단 띠, 기준일, 헤드라인, 마감 임박 단지, 전형·마감, 가까운 역)."""
+# 썸네일 체크리스트: 대표 공고의 신청 경로마다 이 인물이 채운 조건 세 가지.
+# 판정 코드(eligibility·lease_rules)가 보는 요건을 그대로 옮겼다. 경로 이름은 notify_email.short_route 결과.
+CHECKS = {
+    "신혼부부 특공": ("무주택 세대구성원", "혼인 7년 이내", "소득 기준 충족"),
+    "생애최초 특공": ("집을 가진 적 없음", "소득세 5년 이상 납부", "소득 기준 충족"),
+    "신생아 특공": ("2세 미만 자녀", "무주택 세대구성원", "소득·자산 기준 확인"),
+    "다자녀 특공": ("미성년 자녀 2명 이상", "무주택 세대구성원", "청약통장 6개월 이상"),
+    "노부모부양 특공": ("65세 이상 부모 3년 부양", "무주택 세대주", "청약통장 1순위"),
+    "일반공급": ("청약통장 1순위", "무주택 세대구성원", "가점·추첨으로 선정"),
+    "무순위 (줍줍)": ("청약통장 없이 신청", "무주택 세대구성원", "만 19세 이상"),
+    "임의공급": ("청약통장 없이 신청", "거주지 제한 없음", "만 19세 이상"),
+    "든든전세": ("무주택 세대구성원", "소득·자산 기준 없음", "동점이면 추첨"),
+    "청년": ("만 19~39세 미혼", "본인 무주택", "소득 기준 충족"),
+    "신혼·신생아Ⅱ": ("혼인 7년 이내·예비신혼", "무주택 세대구성원", "소득 기준 충족"),
+}
+LOOSE_CHECKS = ("청약통장 없이 신청", "거주지 제한 없음", "만 19세 이상")  # 오피스텔·도시형 등
+LEASE_CHECKS = ("무주택 세대구성원", "소득·자산 기준 충족", "자세한 기준은 공고문")
+
+
+def card_text(alias: str, profile: dict, sale_show, lease_show, verdicts, today: date) -> dict:
+    """썸네일 카드 인자. 대표는 상세에 실린 공고 중 마감이 가장 빠른 곳."""
     soonest = min((*sale_show, *lease_show), key=lambda x: days_left(x, today))
-    route = (best_route(verdicts.get(applyhome_key(soonest))) if "deadline" not in soonest
-             else soonest["kind"].split("(")[0]).replace("❔", "")
-    if "deadline" in soonest:
-        # LH 임대는 여러 곳의 집을 한 공고로 뽑아 역이 하나로 정해지지 않는다. 지역·호수를 적는다
-        focus = f"마감 임박 공고 : {lease_title(soonest['name'])}"
-        houses = f" {soonest['houses']}호" if soonest.get("houses") else ""
-        footer = f"{soonest.get('region') or 'LH'} 일대{houses} 모집 · 집 위치는 공고문 확인"
+    if "deadline" in soonest:  # LH 임대
+        kind = soonest["base_kind"] if soonest.get("base_kind") in CHECKS else soonest["kind"].split("(")[0]
+        checks = CHECKS.get(kind, LEASE_CHECKS)
+        sure = soonest.get("sure", True)  # 상세 유형(든든전세·청년·신혼Ⅱ)은 who 로 이미 걸렀다
+        name = lease_title(soonest["name"])
     else:
-        focus = f"마감 임박 단지 : {plain_name(soonest['name'])}"
-        station = soonest.get("subway") or {}
-        footer = (f"가까운 역 : {station['name']} 도보 {station['walk_min']}분" if station.get("name")
-                  else "가까운 지하철역 없음 (반경 2km)")
-    return (f"{blog['label']} 신청 가능 청약", f"{today.month}월 {today.day}일 기준", f"새 청약 공고 {count}건",
-            focus,
-            " · ".join(x for x in (route, dday(soonest)) if x), footer)
+        verdict = verdicts.get(applyhome_key(soonest))
+        route = best_route(verdict).replace("❔", "")
+        checks = CHECKS.get(route, LOOSE_CHECKS)
+        sure = bool(verdict and verdict.possible)
+        name = plain_name(soonest["name"])
+    household = profile.get("household") or {}
+    left = days_left(soonest, today)
+    number = int(re.sub(r"\D", "", alias.split("-")[0]) or 0)
+    return {
+        "model_no": number, "label": profile["blog"]["label"], "date_line": f"{today.month}월 {today.day}일 기준",
+        "checks": list(checks), "stamp": "신청 가능" if sure else "확인 필요", "name": name,
+        "dday": f"D-{left}" if left < 999 else "",
+        "adults": 2 if profile.get("spouse") else 1, "kids": min(int(household.get("minor_children",
+                                                                   household.get("children")) or 0), 2),
+        "senior": any((p.get("birth_date") or "9999") < f"{today.year - 60}"
+                      for p in (profile.get("applicant") or {}, profile.get("spouse") or {})),
+    }
 
 
 def build_post(blog: dict, sale_show, verdicts, degraded, lease_show, rest, intro, today, images) -> str:
@@ -341,7 +368,7 @@ def run_one(alias, profile, args, keys, cache, today) -> str | None:
     count = len(sale_new) + len(lease_new)
     intro = intro_html(alias, blog, sale_show, lease_show, verdicts, count, today)
     post = build_post(blog, sale_show, verdicts, degraded, lease_show, rest, intro, today, images)
-    card = thumbnail.card_png(*card_text(blog, sale_show, lease_show, verdicts, count, today))
+    card = thumbnail.card_png(**card_text(alias, profile, sale_show, lease_show, verdicts, today))
     if card:  # 네이버는 첫 이미지를 검색 썸네일로 쓴다
         images["thumb@blog"] = card
         post = "<p><img src='cid:thumb@blog' width='540' alt='대표 이미지'></p>" + post
