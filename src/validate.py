@@ -152,6 +152,67 @@ def check_leases(leases: list[dict], today: date) -> list[Issue]:
     return issues
 
 
+# ── 맞춤법 ────────────────────────────────────────────
+# 한국어 맞춤법 검사기는 공식 API 가 없다(네이버·부산대 검사기를 프로그램으로 부르는 건 비공식이라 자주 깨진다).
+# 그래서 프로그램이 만드는 문장에서 실제로 틀릴 수 있는 것만 규칙으로 본다: 변수 뒤 조사, 반복 단어, 공백, 흔한 오기.
+JOSA = {"으로": ("으로", "로"), "로": ("으로", "로"), "은": ("은", "는"), "는": ("은", "는"),
+        "이": ("이", "가"), "가": ("이", "가"), "을": ("을", "를"), "를": ("을", "를"),
+        "과": ("과", "와"), "와": ("과", "와")}
+DIGIT_BATCHIM = {"0": 21, "1": 8, "2": 0, "3": 16, "4": 0, "5": 0, "6": 1, "7": 8, "8": 8, "9": 0}  # 영 일 이 삼 …
+TYPOS = {"됬": "됐", "몇일": "며칠", "할께": "할게", "되요": "돼요", "안되요": "안 돼요", "어떻해": "어떡해",
+         "왠만": "웬만", "금새": "금세", "역활": "역할", "뵈요": "봬요", "희안": "희한", "설겆이": "설거지"}
+
+
+def _batchim(word: str) -> int | None:
+    """단어 마지막 소리의 받침 번호(0 = 없음, 8 = ㄹ). 괄호 속은 빼고 본다. 모르면 None."""
+    word = re.sub(r"\([^)]*\)\s*$", "", word).rstrip(" ·")
+    if not word:
+        return None
+    last = word[-1]
+    if "가" <= last <= "힣":
+        return (ord(last) - 0xAC00) % 28
+    return DIGIT_BATCHIM.get(last)
+
+
+def josa(word: str, particle: str) -> str:
+    """word 에 맞는 조사. josa('분당센트로', '으로') → '로', josa('5.6억', '으로') → '으로'."""
+    with_b, without_b = JOSA[particle]
+    b = _batchim(word)
+    if b is None:
+        return without_b
+    if with_b == "으로":
+        return "로" if b in (0, 8) else "으로"
+    return with_b if b else without_b
+
+
+def check_text(html: str) -> list[str]:
+    """완성된 글에서 맞춤법·표기 문제를 찾는다. 찾은 문제 설명 목록."""
+    problems = []
+    # 1) 변수(굵은 글씨·괄호) 바로 뒤 조사: '센트로</b>(…)으로' 처럼 값이 바뀌는 자리만 본다
+    for m in re.finditer(r"([가-힣0-9]+)(?:</b>)?(\([^)]*\))?(?:</b>)?(으로|로|은|는|이|가|을|를|과|와)(?=[\s,.!?<])",
+                         html):
+        if not (m.group(2) or "</b>" in m.group(0)):
+            continue
+        want = josa(m.group(1), m.group(3))
+        if want != m.group(3):
+            problems.append(f"조사 '{m.group(1)}{m.group(3)}' → '{m.group(1)}{want}'")
+    text = re.sub(r"<[^>]+>", " ", html)
+    text = re.sub(r"&nbsp;|&amp;", " ", text)
+    # 2) 같은 단어가 붙어 반복 ('오피스텔 오피스텔')
+    for m in re.finditer(r"(?<![가-힣\w])([가-힣]{2,}) \1(?![가-힣\w])", text):
+        problems.append(f"같은 단어 반복 '{m.group(0)}'")
+    # 3) 문장부호 앞 공백·빈 괄호
+    for m in re.finditer(r"[가-힣\w] +[,.?!](?=\s|$)", text):
+        problems.append(f"문장부호 앞 공백 '{m.group(0).strip()}'")
+    if "()" in text:
+        problems.append("빈 괄호 '()'")
+    # 4) 흔한 오기
+    for wrong, right in TYPOS.items():
+        if wrong in text:
+            problems.append(f"맞춤법 '{wrong}' → '{right}'")
+    return list(dict.fromkeys(problems))
+
+
 def check_output(items: list[dict], html: str, images: dict[str, bytes]) -> list[Issue]:
     """2차: 받는 사람이 보게 될 메일 완성본이 온전한지."""
     issues: list[Issue] = []
@@ -164,6 +225,7 @@ def check_output(items: list[dict], html: str, images: dict[str, bytes]) -> list
     found = LEFTOVERS.search(re.sub(r"<[^>]+>", " ", html))
     if found:
         issues.append(Issue(2, "메일", f"값이 빈 채로 찍힘 ('{found.group(0)}')"))
+    issues += [Issue(2, "맞춤법", p) for p in check_text(html)]
     return issues
 
 
@@ -184,3 +246,16 @@ def email_notice(issues: list[Issue]) -> str:
         "<div style='color:#888;font-size:12px;margin-top:4px'>"
         "알림은 그대로 보냈습니다. 해당 공고는 청약홈 공고문으로 한 번 더 확인하세요.</div></div>"
     )
+
+
+if __name__ == "__main__":
+    assert josa("분당센트로", "으로") == "로" and josa("5.6억", "으로") == "으로" and josa("부평구 산곡동", "으로") == "으로"
+    assert josa("서울", "으로") == "로" and josa("D-1", "으로") == "로" and josa("A17블록", "은") == "은"
+    assert josa("더샵 분당센트로(경기 · D-1 마감)", "으로") == "로"
+    assert josa("공고", "을") == "를" and josa("단지", "이") == "가" and josa("청약", "과") == "과"
+    bad = check_text("가장 먼저 볼 곳은 <b>더샵 분당센트로</b>(경기 · D-1 마감)으로, 오피스텔 오피스텔 청약 . 됬다")
+    assert any("분당센트로으로" in p for p in bad), bad
+    assert any("반복" in p for p in bad) and any("문장부호" in p for p in bad) and any("됬" in p for p in bad)
+    ok = check_text("가장 먼저 볼 곳은 <b>산곡역자이</b>(인천 · D-9 마감)로, 신혼부부 특공 자격으로 넣을 수 있습니다. 사이가 좋다.")
+    assert ok == [], ok
+    print("ok")

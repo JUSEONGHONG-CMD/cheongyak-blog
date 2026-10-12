@@ -127,12 +127,14 @@ def intro_html(alias: str, blog: dict, sale_show, lease_show, verdicts, count: i
         top = sale_show[0]
         route = best_route(verdicts.get(applyhome_key(top)))
         where = " · ".join(x for x in (str(top.get("area_name") or ""), dday(top)) if x)
-        line = f"가장 먼저 볼 곳은 <b>{escape(plain_name(top['name']))}</b>({escape(where)})으로"
+        top_name = plain_name(top["name"])
+        line = f"가장 먼저 볼 곳은 <b>{escape(top_name)}</b>({escape(where)}){validate.josa(top_name, '으로')}"
         line += f", {escape(route)} 자격으로 넣을 수 있습니다." if route else " 신청할 수 있습니다."
         m = top.get("market") or {}
         if m.get("gap_pct") is not None and top.get("price_min"):
             side = "저렴" if m["gap_pct"] < 0 else "비쌉"
-            line += (f" 분양가는 {detail.price_span(top)}으로 주변 시세보다 약 {abs(m['gap_pct']):.0f}% "
+            price = detail.price_span(top)
+            line += (f" 분양가는 {price}{validate.josa(price, '으로')} 주변 시세보다 약 {abs(m['gap_pct']):.0f}% "
                      f"{side}니다.")
         lines.append(line)
         special = sum(1 for x in sale_show if "특공" in best_route(verdicts.get(applyhome_key(x))))
@@ -187,7 +189,7 @@ def family_icons(profile: dict) -> list[str]:
     household = profile.get("household") or {}
     kids = int(household.get("minor_children", household.get("children")) or 0)
     adults = ["woman", "man"] if profile.get("spouse") else ["man"]
-    return adults + ["girl", "boy"][:min(kids, 2)]
+    return adults + ["girl", "boy", "girl"][:min(kids, 3)]  # 다자녀(3명)와 두 자녀를 구분해 3명까지
 
 
 def card_text(alias: str, profile: dict, sale_show, lease_show, verdicts, today: date) -> dict:
@@ -331,6 +333,7 @@ CHECKLIST = (
         "제목: 위 제목 복사, 과장 표현 없음",
         "썸네일: 카드가 첫 이미지, 대표 이미지로 지정",
         "검증 메모: '없음'이거나, 빨간 칸이면 공고문 확인 끝냄",
+        "맞춤법: 붙여넣은 뒤 에디터의 맞춤법 검사 한 번 (직접 덧붙인 문장 포함)",
         "본문: 표·이미지·링크 깨짐 없음",
         "안내 문구: '가상 인물 · 판정은 참고용'이 맨 끝에 남아 있음",
         "태그: 붙여넣음, 관계없는 키워드 없음",
