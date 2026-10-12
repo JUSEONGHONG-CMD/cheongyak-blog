@@ -6,13 +6,12 @@ on:
     - cron: "0 21 * * 0,2,4"
   workflow_dispatch:
     inputs:
-      group:
-        description: "조 (auto: 날짜로 A·B 번갈아)"
-        type: choice
-        options: [auto, A, B, all]
-        default: auto
+      max:
+        description: "이번에 보낼 원고 수 상한"
+        type: string
+        default: "3"
       only:
-        description: "이 별칭만 (쉼표로 여러 명, 조 무시)"
+        description: "이 별칭만 (쉼표로 여러 명)"
         type: string
         default: ""
 
@@ -39,8 +38,8 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           BLOG_TO: ${{ secrets.BLOG_TO }}
           ONLY: ${{ inputs.only }}
-          GROUP: ${{ inputs.group || 'auto' }}
-        run: python -m src.main --group "$GROUP" ${ONLY:+--only "$ONLY"}
+          MAX: ${{ inputs.max || '3' }}
+        run: python -m src.main --max "$MAX" ${ONLY:+--only "$ONLY"}
       - name: 발송 이력·캐시 커밋
         if: always()
         run: |

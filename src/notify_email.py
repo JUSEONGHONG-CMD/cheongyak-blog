@@ -171,11 +171,17 @@ def market_chart(item: dict, images: dict[str, bytes]) -> str:
     )
 
 
+def short_route(name: str) -> str:
+    """표 칸용 짧은 이름. 구간·명의는 아래 상세에 있으니 묶는다: '신혼부부 특별공급 (우선공급분)' → '신혼부부 특공'."""
+    return name.split(" (")[0].replace("특별공급", "특공").replace("일반공급 추첨제", "일반공급")
+
+
 def _routes_cell(verdict) -> str:
-    routes = verdict.possible or verdict.conditional
+    routes = verdict.possible + verdict.conditional
     if not routes:
         return "-"
-    return "<br>".join(escape(r.name) for r in routes)
+    names = dict.fromkeys(("" if r.status == "가능" else "❔") + short_route(r.name) for r in routes)
+    return "<br>".join(escape(n) for n in names)
 
 
 CHECKS_MARK = "<!--checks-->"
@@ -245,11 +251,11 @@ def detail_table(lines: list[str], extra: dict[str, str] | None = None) -> str:
             style = "padding-left:14px;color:#666;font-size:12px" if sub else ""
             parts.append(f"<div style='{style}'>{escape(text)}</div>")
         rows.append(
-            f"<tr><td style='{LABEL_TD}'>{escape(label)}</td>"
+            f"<tr><td width='18%' style='{LABEL_TD}'>{escape(label)}</td>"
             f"<td style='{VALUE_TD}'>{''.join(parts)}{extra.get(label, '')}</td></tr>"
         )
     return (
-        "<table cellpadding='0' cellspacing='0' "
+        "<table width='100%' cellpadding='0' cellspacing='0' "
         "style='border-collapse:collapse;width:100%;border-top:1px solid #eee'>"
         + "".join(rows) + "</table>"
     )
@@ -294,9 +300,10 @@ def build_html(
         return "".join(out)
 
     # ── 한눈에 보는 표 ─────────────────────────────
-    out.append("<table style='border-collapse:collapse;width:100%;margin-bottom:24px'><tr>")
-    for head in ("#", "단지", "마감", "분양가", "시세 대비", "신청 가능"):
-        out.append(f"<th style='{TH}'>{head}</th>")
+    # 네이버 에디터는 붙여 넣을 때 CSS 너비를 버리고 width 속성은 지킨다. 열 너비를 속성으로 고정한다
+    out.append("<table width='100%' style='border-collapse:collapse;width:100%;margin-bottom:24px'><tr>")
+    for head, width in (("#", 5), ("단지", 33), ("마감", 10), ("분양가", 15), ("시세 대비", 15), ("신청 가능", 22)):
+        out.append(f"<th width='{width}%' style='{TH}'>{head}</th>")
     out.append("</tr>")
 
     for item in items:

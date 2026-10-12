@@ -35,6 +35,13 @@ TREND_POINTS = 13
 COHORT_YEARS = (10, 15, None)
 MIN_RECENT_TRADES = 10
 
+# 공급지역(청약홈 SUBSCRPT_AREA_CODE_NM) → 법정동코드 앞 두 자리. 강원·전북은 특별자치도 전환으로 코드가 둘
+SIDO_CODES = {
+    "서울": ("11",), "부산": ("26",), "대구": ("27",), "인천": ("28",), "광주": ("29",), "대전": ("30",),
+    "울산": ("31",), "세종": ("36",), "경기": ("41",), "강원": ("42", "51"), "충북": ("43",), "충남": ("44",),
+    "전북": ("45", "52"), "전남": ("46",), "경북": ("47",), "경남": ("48",), "제주": ("50",),
+}
+
 _reported: set[str] = set()
 
 
@@ -150,6 +157,11 @@ def summarize(item: dict, service_key: str, kakao_key: str, cache=None,
 
     lawd = region_code(coords[0], coords[1], kakao_key, cache)
     if not lawd:
+        return None
+    # 좌표가 다른 시·도로 잘못 잡히면 엉뚱한 동네 시세와 견주게 된다(부평 공고 ↔ 제천 시세).
+    expected = SIDO_CODES.get((item.get("area_name") or "").strip())
+    if expected and not lawd.startswith(expected):
+        _report(f"{item.get('name')}: 좌표 시·도({lawd[:2]})가 공급지역({item.get('area_name')})과 달라 시세 생략")
         return None
 
     target_area = statistics.median(areas)

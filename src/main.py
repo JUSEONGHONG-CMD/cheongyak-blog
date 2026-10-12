@@ -34,6 +34,7 @@ from . import (
 from .config import MissingKey, env, load_profiles
 from .state import SeenStore
 
+SLOTS = ("08:30", "12:30", "19:30")  # 그날 나가는 순서대로 붙는 예약 발행 시각
 DETAIL_MAX = 6  # 글 하나에 자세히 쓰는 새 공고 수. 나머지는 한 줄 목록
 # 누구나 넣는 유형. 인물마다 다를 게 없어 상세 자리는 특공·일반공급 공고에 먼저 준다
 ANYONE = ("임의공급", "무순위", "오피스텔등", "공공지원민간임대")
@@ -151,8 +152,13 @@ def build_mail(blog: dict, title: str, tags: list[str], issues: list, post: str)
     )
 
 
-def run_one(alias, profile, args, keys, cache, today) -> bool:
-    """한 인물. 원고를 보냈으면(미리보기는 만들었으면, 새 공고가 없어 건너뛰었으면) True."""
+def last_posted(alias: str) -> str:
+    """이 인물 원고가 마지막으로 나간 날(YYYY-MM-DD). 한 번도 없으면 ''."""
+    return max((r.get("last_sent") or r.get("first_sent") or "" for r in SeenStore(alias).data.values()), default="")
+
+
+def run_one(alias, profile, args, keys, cache, today) -> str | None:
+    """한 인물. 'sent'(미리보기는 만들었음) · 'skip'(새 공고 없음) · None(실패)."""
     blog = profile["blog"]
     seen = SeenStore(alias)
     sale, verdicts, degraded = collect_sale(profile, keys, cache, today)
@@ -162,7 +168,7 @@ def run_one(alias, profile, args, keys, cache, today) -> bool:
     print(f"      분양 {len(sale)}건(새 {len(sale_new)}) · 임대 {len(leases)}건(새 {len(lease_new)})")
     if not sale_new and not lease_new:
         print("      새 공고 없음 — 건너뜀")
-        return True
+        return "skip"
 
     sale_show, lease_show = split_detail(sale_new, lease_new)
     for number, x in enumerate(sale_show, 1):  # 순서를 바꿨으니 표의 # 도 다시 매긴다
@@ -189,24 +195,15 @@ def run_one(alias, profile, args, keys, cache, today) -> bool:
             mail = mail.replace(f"cid:{cid}", f"{cid.split('@')[0]}.png")
         path.write_text(mail, encoding="utf-8")
         print(f"      미리보기: {path.resolve()}")
-        return True
+        return "sent"
     to = {"notify": {"email": {"to": [env("BLOG_TO", required=False) or env("GMAIL_ADDRESS")]}}}
     if not notify_email.send(to, mail, today, images, subject=f"[블로그 원고] {title}"):
-        return False
+        return None
     for x in (*sale_show, *lease_show):
         seen.mark(x, today)
     seen.prune(today)
     seen.save()
-    return True
-
-
-def group_of_day(today: date) -> str | None:
-    """월·수·금마다 A·B 조를 번갈아 낸다(이번 주 A·B·A 면 다음 주 B·A·B). 그 밖의 요일은 None."""
-    slot = {0: 0, 2: 1, 4: 2}.get(today.weekday())
-    if slot is None:
-        return None
-    week = (today.toordinal() - 1) // 7  # 1년 1월 1일이 월요일이라 주가 월요일에 바뀐다
-    return "AB"[(week * 3 + slot) % 2]
+    return "sent"
 
 
 def run(args: argparse.Namespace) -> int:
@@ -215,18 +212,21 @@ def run(args: argparse.Namespace) -> int:
     if args.only:
         wanted = {a.strip() for a in args.only.split(",") if a.strip()}
         profiles = {k: v for k, v in profiles.items() if k in wanted}
-    else:
-        group = args.group if args.group != "auto" else group_of_day(today)
-        if group in ("A", "B"):
-            profiles = {k: v for k, v in profiles.items() if v["blog"].get("group") == group}
-        print(f"오늘 조: {group or '전원'} · {len(profiles)}명")
+    # 오래 안 나간 인물부터. 못 나간 인물의 새 공고는 기록이 안 남아 다음 발행일로 넘어간다
+    order = sorted(profiles, key=lambda a: (last_posted(a), a))
+    print(f"하루 최대 {args.max}편 · 순서: {', '.join(order)}")
     keys = {
         "service": env("ODCLOUD_SERVICE_KEY"),
         "kakao": env("KAKAO_REST_API_KEY", required=False) or "",
     }
     cache = geo.GeoCache()
     failed = []
-    for alias, profile in profiles.items():
+    sent = 0
+    for alias in order:
+        if sent >= args.max:
+            break
+        profile = profiles[alias]
+        profile["blog"]["publish_time"] = SLOTS[sent % len(SLOTS)]
         print(f"\n===== {alias} · {profile['blog']['category']} =====")
         try:
             ok = run_one(alias, profile, args, keys, cache, today)
@@ -235,18 +235,20 @@ def run(args: argparse.Namespace) -> int:
             ok = False
         finally:
             cache.save()
-        if not ok:
+        if ok is None:
             failed.append(alias)
-    print(f"\n완료 {len(profiles) - len(failed)}/{len(profiles)}명" + (f" · 실패: {', '.join(failed)}" if failed else ""))
+        elif ok == "sent":
+            sent += 1
+    print(f"\n원고 {sent}편" + (f" · 실패: {', '.join(failed)}" if failed else ""))
     return 1 if failed else 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="청약 블로그 원고 생성기")
     parser.add_argument("--preview", metavar="DIR", help="메일을 보내지 않고 DIR/<별칭>.html 로 저장 (발송 이력도 안 남김)")
-    parser.add_argument("--only", metavar="ALIAS", help="이 별칭들만 (쉼표로 여러 명, 조 무시)")
-    parser.add_argument("--group", choices=("auto", "A", "B", "all"), default="auto",
-                        help="auto: 월·수·금은 날짜로 A·B 번갈아, 다른 요일은 전원")
+    parser.add_argument("--only", metavar="ALIAS", help="이 별칭들만 (쉼표로 여러 명)")
+    parser.add_argument("--max", type=int, default=int(os.environ.get("BLOG_DAILY_MAX") or 3),
+                        help="한 번에 보낼 원고 수 상한 (기본 3, 환경변수 BLOG_DAILY_MAX)")
     args = parser.parse_args()
     try:
         return run(args)
@@ -261,9 +263,6 @@ if __name__ == "__main__":
         assert split_detail([1] * 5, [2]) == ([1] * 5, [2])
         assert split_detail([1], [2] * 9) == ([1], [2] * 5)
         assert split_detail([], [2] * 9) == ([], [2] * 6)
-        days = [date(2026, 10, d) for d in (5, 7, 9, 12, 14, 16)]  # 월수금 두 주
-        assert [group_of_day(d) for d in days] in (list("ABABAB"), list("BABABA"))
-        assert group_of_day(date(2026, 10, 6)) is None
         print("ok")
         raise SystemExit(0)
     raise SystemExit(main())

@@ -95,11 +95,15 @@ def _report_http_error(exc: requests.HTTPError) -> None:
         print(f"       {body[:200]}", file=sys.stderr)
 
 
-def geocode(address: str, rest_key: str, cache: GeoCache | None = None) -> tuple[float, float] | None:
-    """주소 → (위도, 경도). 주소 검색이 실패하면 키워드 검색으로 한 번 더 시도한다."""
+def geocode(address: str, rest_key: str, cache: GeoCache | None = None, sido: str = "") -> tuple[float, float] | None:
+    """주소 → (위도, 경도). 주소 검색이 실패하면 키워드 검색으로 한 번 더 시도한다.
+
+    sido('인천' 등)를 주면 그 시·도 결과만 받는다. 공고 원문을 키워드 검색하면 다른 지방의
+    장소가 첫 결과로 오기도 해서다(부평 산곡동 공고 → 충북 제천).
+    """
     if not address:
         return None
-    key = f"geo:{address}"
+    key = f"geo:{sido}:{address}" if sido else f"geo:{address}"
     if cache and (hit := cache.get(key)) is not None:
         return tuple(hit) if hit else None
 
@@ -109,7 +113,7 @@ def geocode(address: str, rest_key: str, cache: GeoCache | None = None) -> tuple
             response = requests.get(
                 f"{BASE}/{path}",
                 headers=_headers(rest_key),
-                params={param: address, "size": 1},
+                params={param: address, "size": 5 if sido else 1},
                 timeout=TIMEOUT,
             )
             response.raise_for_status()
@@ -121,8 +125,8 @@ def geocode(address: str, rest_key: str, cache: GeoCache | None = None) -> tuple
         except requests.RequestException as exc:
             print(f"[경고] 지오코딩 네트워크 오류: {exc}", file=sys.stderr)
             documents = []
-        if documents:
-            doc = documents[0]
+        doc = next((d for d in documents if (d.get("address_name") or "").startswith(sido)), None)
+        if doc:
             result = (float(doc["y"]), float(doc["x"]))
             break
 
@@ -252,11 +256,15 @@ def address_candidates(address: str, name: str = "") -> list[str]:
     if "," in address and head:
         candidates.insert(0, head)
 
-    # 괄호 안에 실제 지번 주소가 들어 있는 경우가 많다
-    for inner in re.findall(r"\(([^)]*)\)", address):
-        inner = inner.strip()
-        if inner and inner not in candidates:
-            candidates.append(inner)
+    # 괄호 안에는 실제 지번 주소(김포 예)가 들기도, 사업명이 들기도 한다. 사업명은 키워드 검색에서
+    # 다른 지방 장소가 걸리므로('산곡6 주택재개발정비사업' → 제천), 주소처럼 생긴 괄호 → 괄호·'일원'을
+    # 뺀 원문 → 나머지 괄호 순으로 본다.
+    inners = [i.strip() for i in re.findall(r"\(([^)]*)\)", address) if i.strip()]
+    looks_address = [i for i in inners if re.search(r"\S(시|군|구|동|읍|면|리)\s", i + " ")]
+    bare = re.sub(r"\s+", " ", re.sub(r"\([^)]*\)", " ", address).replace("일원", " ")).strip()
+    for candidate in (*looks_address, bare, *inners):
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
 
     if name and name not in candidates:
         candidates.append(name)
@@ -278,7 +286,7 @@ def enrich(items: list[dict], rest_key: str, cache: GeoCache) -> None:
         candidates = address_candidates(item.get("address") or "", item.get("name") or "")
         coords = None
         for index, candidate in enumerate(candidates):
-            coords = geocode(candidate, rest_key, cache)
+            coords = geocode(candidate, rest_key, cache, (item.get("area_name") or "").strip())
             if coords:
                 # 원문이 아닌 후보로 찾았다면 좌표가 대략적이라는 뜻이다
                 item["coords_approximate"] = index > 0
