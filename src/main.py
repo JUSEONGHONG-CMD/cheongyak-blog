@@ -180,6 +180,16 @@ LOOSE_CHECKS = ("청약통장 없이 신청", "거주지 제한 없음", "만 19
 LEASE_CHECKS = ("무주택 세대구성원", "소득·자산 기준 충족", "자세한 기준은 공고문")
 
 
+def family_icons(profile: dict) -> list[str]:
+    """썸네일 가족 아이콘. blog.icons 가 있으면 그대로, 없으면 부부는 아내·남편, 아이는 딸·아들 번갈아(최대 2명)."""
+    if profile["blog"].get("icons"):
+        return list(profile["blog"]["icons"])
+    household = profile.get("household") or {}
+    kids = int(household.get("minor_children", household.get("children")) or 0)
+    adults = ["woman", "man"] if profile.get("spouse") else ["man"]
+    return adults + ["girl", "boy"][:min(kids, 2)]
+
+
 def card_text(alias: str, profile: dict, sale_show, lease_show, verdicts, today: date) -> dict:
     """썸네일 카드 인자. 대표는 상세에 실린 공고 중 마감이 가장 빠른 곳."""
     soonest = min((*sale_show, *lease_show), key=lambda x: days_left(x, today))
@@ -201,8 +211,7 @@ def card_text(alias: str, profile: dict, sale_show, lease_show, verdicts, today:
         "model_no": number, "label": profile["blog"]["label"], "date_line": f"{today.month}월 {today.day}일 기준",
         "checks": list(checks), "stamp": "신청 가능" if sure else "확인 필요", "name": name,
         "dday": f"D-{left}" if left < 999 else "",
-        "adults": 2 if profile.get("spouse") else 1, "kids": min(int(household.get("minor_children",
-                                                                   household.get("children")) or 0), 2),
+        "icons": family_icons(profile),
         "senior": any((p.get("birth_date") or "9999") < f"{today.year - 60}"
                       for p in (profile.get("applicant") or {}, profile.get("spouse") or {})),
     }

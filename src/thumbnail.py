@@ -47,30 +47,54 @@ def _heavy_font(default: str) -> str:
     return next((f for f in HEAVY if f in installed), default)
 
 
-def _people(ax, adults: int, kids: int, senior: bool) -> None:
-    """띠 왼쪽의 단순한 인물 아이콘. 어른은 크게, 아이는 작게 겹쳐 세운다."""
-    hair = "#9a9a9a" if senior else HAIR
-    shirts = ["#f5a623", INK, "#7ed3a4", "#ff8fa3"]
+# 인물 아이콘: woman·man 은 어른, girl·boy 는 아이. 옷 색과 머리 모양으로 성별을 구분한다
+SHIRTS = {"woman": "#ff7aa2", "man": "#1f3b5c", "girl": "#ffb3c7", "boy": "#5ec98f"}
+
+
+def _person(ax, x: float, kind: str, hair: str, z: int) -> float:
+    """한 사람을 그리고 다음 사람의 x 를 돌려준다."""
+    small = kind in ("girl", "boy")
+    female = kind in ("woman", "girl")
+    r = 0.022 if small else 0.03
+    base, body_h = 0.835, (0.045 if small else 0.06)
+    cy = base + body_h + r * 0.9
+    if kind == "woman":  # 어깨까지 오는 긴 머리: 얼굴 뒤에 깐다
+        ax.add_patch(FancyBboxPatch((x - r * 1.15, cy - r * 1.35), r * 2.3, r * 2.3,
+                                    boxstyle=f"round,pad=0,rounding_size={r}", facecolor=hair,
+                                    edgecolor="none", zorder=z))
+    if kind == "girl":  # 양 갈래 머리
+        for side in (-1, 1):
+            ax.add_patch(Circle((x + side * r * 1.15, cy + r * 0.1), r * 0.45, facecolor=hair, zorder=z))
+    ax.add_patch(FancyBboxPatch((x - r * 1.25, base), r * 2.5, body_h, boxstyle="round,pad=0,rounding_size=0.02",
+                                facecolor=SHIRTS[kind], edgecolor="none", zorder=z + 1))
+    if kind == "man":  # 넥타이
+        ax.add_patch(Rectangle((x - r * 0.12, base + body_h * 0.25), r * 0.24, body_h * 0.7,
+                               facecolor="#e8434b", edgecolor="none", zorder=z + 2))
+    ax.add_patch(Circle((x, cy), r, facecolor=SKIN, edgecolor="none", zorder=z + 3))
+    # 앞머리: 여자는 둥근 앞머리, 남자는 짧게 위만
+    ax.add_patch(Wedge((x, cy + r * (0.2 if female else 0.4)), r * 1.02, 0 if female else 15,
+                       180 if female else 165, facecolor=hair, edgecolor="none", zorder=z + 4))
+    for side in (-1, 1):  # 눈
+        ax.add_patch(Circle((x + side * r * 0.38, cy - r * 0.15), r * 0.11, facecolor=INK, zorder=z + 5))
+        if female:  # 볼 터치
+            ax.add_patch(Circle((x + side * r * 0.62, cy - r * 0.45), r * 0.16, facecolor="#ff9fb0",
+                                zorder=z + 5))
+    ax.add_patch(Wedge((x, cy - r * 0.38), r * 0.28, 200, 340, width=r * 0.08, facecolor="#c0504d",
+                       edgecolor="none", zorder=z + 5))  # 입
+    return x + (0.042 if small else 0.05)
+
+
+def _people(ax, icons: list[str], senior: bool) -> float:
+    """띠 왼쪽 가족 아이콘. 그린 뒤 오른쪽 끝 x 를 돌려준다."""
+    hair = "#a7a7a7" if senior else HAIR
     x = 0.065
-    for i in range(adults + kids):
-        small = i >= adults
-        r = 0.022 if small else 0.03
-        base = 0.835
-        body_h = 0.045 if small else 0.06
-        ax.add_patch(FancyBboxPatch((x - r * 1.25, base), r * 2.5, body_h, boxstyle="round,pad=0,rounding_size=0.02",
-                                    facecolor=shirts[i % len(shirts)], edgecolor="none", zorder=3 + i))
-        cy = base + body_h + r * 0.9
-        ax.add_patch(Circle((x, cy), r, facecolor=SKIN, edgecolor="none", zorder=4 + i))
-        ax.add_patch(Wedge((x, cy + r * 0.35), r * 1.0, 10, 170, facecolor=hair, edgecolor="none", zorder=5 + i))
-        for side in (-1, 1):  # 눈
-            ax.add_patch(Circle((x + side * r * 0.38, cy - r * 0.05), r * 0.11, facecolor=INK, zorder=6 + i))
-        ax.add_patch(Wedge((x, cy - r * 0.3), r * 0.28, 200, 340, width=r * 0.08, facecolor="#c0504d",
-                           edgecolor="none", zorder=6 + i))  # 입
-        x += 0.045 if not small else 0.035
+    for i, kind in enumerate(icons):
+        x = _person(ax, x, kind, hair, 3 + i * 10)
+    return x
 
 
 def card_png(model_no: int, label: str, date_line: str, checks: list[str], stamp: str,
-             name: str, dday: str, adults: int = 1, kids: int = 0, senior: bool = False) -> bytes | None:
+             name: str, dday: str, icons: list[str] = ("man",), senior: bool = False) -> bytes | None:
     """1080×1080 카드. 글꼴이 없으면 None."""
     font = korean_font()
     if not font:
@@ -98,8 +122,7 @@ def card_png(model_no: int, label: str, date_line: str, checks: list[str], stamp
 
     # 파란 띠: 인물 아이콘 · 모델 번호 · 인물 이름 · 기준일
     ax.add_patch(Rectangle((0, 0.82), 1, 0.18, facecolor=BLUE, edgecolor="none"))
-    _people(ax, adults, kids, senior)
-    left = 0.065 + 0.045 * adults + 0.035 * kids + 0.03
+    left = _people(ax, list(icons), senior) + 0.01
     write(left, 0.945, f"모델 {model_no:02d}", 14, BLUE_SOFT, weight="normal")
     write(left, 0.885, label, 25, "white", limit=0.72)
     write(0.95, 0.945, date_line, 13, BLUE_SOFT, weight="normal", ha="right")
@@ -140,6 +163,6 @@ def card_png(model_no: int, label: str, date_line: str, checks: list[str], stamp
 if __name__ == "__main__":
     png = card_png(3, "맞벌이 신혼부부", "10월 12일 기준",
                    ["무주택 세대구성원", "혼인 7년 이내", "청약통장 6개월 이상"], "신청 가능",
-                   "○○지구 신혼희망타운", "D-3", adults=2)
+                   "○○지구 신혼희망타운", "D-3", icons=["woman", "man", "girl", "boy"])
     assert png is None or png[:4] == b"\x89PNG"
     print("ok" if png else "ok (한글 글꼴 없음 → 썸네일 생략)")
