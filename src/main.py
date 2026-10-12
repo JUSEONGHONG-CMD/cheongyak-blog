@@ -21,6 +21,7 @@ from pathlib import Path
 from . import (
     applyhome,
     builder,
+    detail,
     eligibility,
     geo,
     lease,
@@ -30,6 +31,7 @@ from . import (
     presale,
     ranking,
     regulation,
+    thumbnail,
     validate,
 )
 from .config import MissingKey, env, load_profiles
@@ -103,7 +105,50 @@ def one_liner(item: dict, today: date) -> str:
             + (f" · D-{left}" if left is not None else "") + "</li>")
 
 
-def build_post(blog: dict, sale_show, verdicts, degraded, lease_show, rest, count, today, images) -> str:
+OPENINGS = (
+    "{m}월 {d}일, {label} 조건으로 새로 넣을 수 있는 공고가 {n}건 나왔습니다.",
+    "{label} 기준으로 이번에 새로 열린 공고를 확인해 보니 {n}건이 있었어요.",
+    "{label} 상황이라면 눈여겨볼 새 공고가 {n}건입니다 ({m}월 {d}일 기준).",
+)
+
+
+def dday(item: dict) -> str:
+    """분양은 days_left, LH 임대는 deadline 으로 'D-9'."""
+    left = item.get("days_left") if "deadline" not in item else (item["deadline"] - date.today()).days
+    return "" if left is None else ("오늘 마감" if left == 0 else f"D-{left} 마감")
+
+
+def intro_html(alias: str, blog: dict, sale_show, lease_show, verdicts, count: int, today: date) -> str:
+    """원고마다 달라지는 도입부 2~4문장. 같은 틀이 반복되면 네이버가 유사 문서로 볼 수 있어
+    여는 문장을 인물·날짜로 돌리고, 나머지는 그날 공고 숫자로 채운다."""
+    variant = (sum(map(ord, alias)) + today.toordinal()) % len(OPENINGS)
+    lines = [OPENINGS[variant].format(m=today.month, d=today.day, label=blog["label"], n=count)]
+    if sale_show:
+        top = sale_show[0]
+        route = best_route(verdicts.get(applyhome_key(top)))
+        where = " · ".join(x for x in (str(top.get("area_name") or ""), dday(top)) if x)
+        line = f"가장 먼저 볼 곳은 <b>{escape(plain_name(top['name']))}</b>({escape(where)})으로"
+        line += f", {escape(route)} 자격으로 넣을 수 있습니다." if route else " 신청할 수 있습니다."
+        m = top.get("market") or {}
+        if m.get("gap_pct") is not None and top.get("price_min"):
+            side = "저렴" if m["gap_pct"] < 0 else "비쌉"
+            line += (f" 분양가는 {detail.price_span(top)}으로 주변 시세보다 약 {abs(m['gap_pct']):.0f}% "
+                     f"{side}니다.")
+        lines.append(line)
+        special = sum(1 for x in sale_show if "특공" in best_route(verdicts.get(applyhome_key(x))))
+        if special > 1:
+            lines.append(f"특별공급으로 넣을 수 있는 분양 공고는 {special}곳입니다.")
+    if lease_show:
+        kinds = list(dict.fromkeys(x["kind"].split("(")[0] for x in lease_show))
+        first = min(x["deadline"] for x in lease_show)
+        lines.append(f"LH 임대는 {escape('·'.join(kinds[:3]))} 등 {len(lease_show)}건이 새로 접수 중이고, "
+                     f"가장 빠른 마감은 {first.month}월 {first.day}일입니다.")
+    if count > len(sale_show) + len(lease_show):
+        lines.append("나머지 공고는 아래 목록에 한 줄씩 정리했어요.")
+    return f"<p style='font-size:15px;line-height:1.8'>{' '.join(lines)}</p>"
+
+
+def build_post(blog: dict, sale_show, verdicts, degraded, lease_show, rest, intro, today, images) -> str:
     """블로그 본문. 그래프는 images 에 {cid: png} 로 채운다."""
     facts = "".join(f"<li>{escape(f)}</li>" for f in blog.get("facts") or [])
     out = [
@@ -111,10 +156,7 @@ def build_post(blog: dict, sale_show, verdicts, degraded, lease_show, rest, coun
         f"<p style='margin:0 0 6px'><b>👤 이 글의 모델 — {escape(blog['category'])}</b></p>"
         f"<p style='margin:0 0 6px'>{escape(blog.get('intro') or '')}</p>"
         f"<ul style='margin:0;padding-left:18px;font-size:14px'>{facts}</ul></div>",
-        f"<p>{today.month}월 {today.day}일 기준, 이 조건으로 <b>새로 지원할 수 있는 공고가 {count}건</b> 나왔습니다."
-        + (f" 그중 {len(sale_show) + len(lease_show)}건을 자세히, 나머지는 아래 목록으로 정리했습니다."
-           if count > len(sale_show) + len(lease_show) else "")
-        + " 비슷한 상황이라면 참고해 보세요.</p>",
+        intro,
     ]
     if sale_show:
         html = notify_email.build_html(sale_show, verdicts, today, degraded, applyhome_key, images)
@@ -135,6 +177,11 @@ def build_post(blog: dict, sale_show, verdicts, degraded, lease_show, rest, coun
 
 
 TAG_MAX = 20  # 네이버 태그 상한은 30개. 너무 많으면 광고성으로 보여 20개로 묶는다
+
+
+def plain_name(name) -> str:
+    """괄호 속(공공분양·본청약 등)을 뺀 단지명."""
+    return re.sub(r"\s*\([^)]*\)", "", str(name)).strip()
 
 
 def compact(name: str) -> str:
@@ -159,7 +206,7 @@ def best_route(verdict) -> str:
 
 def post_title(blog: dict, top: dict, route: str, count: int, today: date) -> str:
     """네이버는 제목 앞쪽 단어를 검색에 크게 본다. 사람들이 찾는 단지명·전형을 앞에 둔다."""
-    name = re.sub(r"\s*\([^)]*\)", "", str(top["name"])).strip()[:28]
+    name = plain_name(top["name"])[:28]
     what = route if "특공" in route else "청약"  # '오피스텔 오피스텔 청약'처럼 단지명과 겹치지 않게
     return f"{name} {what} 자격 — {blog['label']} 기준 새 공고 {count}건 ({today.month}/{today.day})"
 
@@ -179,6 +226,34 @@ def post_tags(blog: dict, sale_show: list, lease_show: list, verdicts: dict, tod
     return [t for t in dict.fromkeys(tags) if t][:TAG_MAX]
 
 
+def drop_suspect_numbers(items: list[dict]) -> list[validate.Issue]:
+    """공개 글에 틀린 시세가 나가지 않게, 의심스러운 비교는 글에서 아예 뺀다(베타는 메모만 남긴다).
+
+    산곡역 단지가 제천 시세와 비교돼 '193% 비쌈'으로 나간 일이 있었다(2026-10-12).
+    - 위치를 못 찾음 → 메모(지도·역·시세가 빠진 채 나감)
+    - 시세를 잰 시·군·구 코드가 공급지역 시·도가 아님 → 시세 삭제
+    - 시세·주변 분양가와 차이가 GAP_LIMIT(%) 초과 → 그 비교 삭제
+    """
+    issues = []
+    for item in items:
+        where = str(item.get("name") or "")[:20]
+        if not item.get("coords"):
+            issues.append(validate.Issue(1, where, "위치를 찾지 못해 지하철역·시세 없이 나감"))
+        m = item.get("market") or {}
+        expected = market.SIDO_CODES.get((item.get("area_name") or "").strip())
+        if m and expected and not str(m.get("lawd", "")).startswith(expected):
+            item["market"] = None
+            issues.append(validate.Issue(1, where, f"시세를 다른 시·도({m.get('lawd')})에서 잡아 시세를 빼고 보냄"))
+        elif m and abs(m.get("gap_pct") or 0) > validate.GAP_LIMIT:
+            item["market"] = None
+            issues.append(validate.Issue(1, where, f"시세 대비 {m['gap_pct']:+.0f}%로 비정상이라 시세를 빼고 보냄"))
+        p = item.get("presales") or {}
+        if p and abs(p.get("gap_pct") or 0) > validate.GAP_LIMIT:
+            item["presales"] = None
+            issues.append(validate.Issue(1, where, f"주변 분양가 대비 {p['gap_pct']:+.0f}%로 비정상이라 빼고 보냄"))
+    return issues
+
+
 def build_mail(blog: dict, title: str, tags: list[str], issues: list, post: str) -> str:
     """운영자용 메일: 위에는 발행 정보, 구분선 아래는 그대로 복사할 본문."""
     notes = "<br>".join(escape(str(i)) for i in issues) or "없음"
@@ -192,7 +267,9 @@ def build_mail(blog: dict, title: str, tags: list[str], issues: list, post: str)
         + row.format("제목", f"<b>{escape(title)}</b>")
         + row.format("태그 (입력란에 붙여넣기)", f"<b>{escape(', '.join(tags))}</b>")
         + row.format("예약 발행", escape(blog.get("publish_time") or "-"))
-        + row.format("검증 메모", notes)
+        + (row.format("검증 메모", notes) if not issues else
+           "<tr><td style='padding:4px 10px;color:#c33'><b>검증 메모</b></td>"
+           f"<td style='padding:4px 10px;background:#fde8e8;color:#c33'><b>{notes}</b></td></tr>")
         + "</table><p style='color:#c33;font-size:13px'>▼ 아래 선부터 끝까지 복사해 스마트에디터에 붙여 넣으세요 ▼</p>"
         "<hr>" + post + "</body></html>"
     )
@@ -209,6 +286,9 @@ def run_one(alias, profile, args, keys, cache, today) -> str | None:
     seen = SeenStore(alias)
     sale, verdicts, degraded = collect_sale(profile, keys, cache, today)
     leases = collect_lease(profile, keys, cache, today)
+    # 글은 그날 08:30 이후 올라간다. 오늘 마감 공고는 읽는 사람이 넣을 시간이 없어 뺀다
+    sale = [x for x in sale if x.get("days_left") != 0]
+    leases = [x for x in leases if x["deadline"] > today]
     sale_new = sorted((x for x in sale if seen.is_new(x)), key=lambda x: x.get("category") in ANYONE)
     lease_new = [x for x in leases if seen.is_new(x)]
     print(f"      분양 {len(sale)}건(새 {len(sale_new)}) · 임대 {len(leases)}건(새 {len(lease_new)})")
@@ -221,11 +301,22 @@ def run_one(alias, profile, args, keys, cache, today) -> str | None:
         x["rank"] = number
     shown = {id(x) for x in (*sale_show, *lease_show)}
     rest = [x for x in (*sale, *leases) if id(x) not in shown]
-    issues = [*validate.check_data(sale_show, verdicts, applyhome_key, today, profile.get("filters") or {}),
+    issues = [*drop_suspect_numbers(sale_show),
+              *validate.check_data(sale_show, verdicts, applyhome_key, today, profile.get("filters") or {}),
               *validate.check_leases(lease_show, today)]
     images: dict[str, bytes] = {}
     count = len(sale_new) + len(lease_new)
-    post = build_post(blog, sale_show, verdicts, degraded, lease_show, rest, count, today, images)
+    intro = intro_html(alias, blog, sale_show, lease_show, verdicts, count, today)
+    post = build_post(blog, sale_show, verdicts, degraded, lease_show, rest, intro, today, images)
+    top_item = (sale_show or lease_show)[0]
+    top_route = best_route(verdicts.get(applyhome_key(top_item))) if sale_show else top_item["kind"].split("(")[0]
+    card = thumbnail.card_png(blog["label"], f"새 청약 공고 {count}건",
+                              plain_name(top_item["name"]),
+                              " · ".join(x for x in (top_route, dday(top_item)) if x),
+                              f"{today.month}월 {today.day}일 · 가상 인물 맞춤 청약 정리")
+    if card:  # 네이버는 첫 이미지를 검색 썸네일로 쓴다
+        images["thumb@blog"] = card
+        post = "<p><img src='cid:thumb@blog' width='540' alt='대표 이미지'></p>" + post
     issues += validate.check_output(sale_show, post, images)
 
     top = (sale_show or lease_show)[0]
@@ -246,8 +337,11 @@ def run_one(alias, profile, args, keys, cache, today) -> str | None:
         print(f"      미리보기: {path.resolve()}")
         return "sent"
     to = {"notify": {"email": {"to": [env("BLOG_TO", required=False) or env("GMAIL_ADDRESS")]}}}
-    if not notify_email.send(to, mail, today, images, subject=f"[블로그 원고] {title}"):
+    tag = "[시험] " if args.test else ""
+    if not notify_email.send(to, mail, today, images, subject=f"{tag}[블로그 원고] {title}"):
         return None
+    if args.test:  # 시험 발송은 기록을 남기지 않아 같은 공고가 실제 원고에 그대로 나간다
+        return "sent"
     for x in (*sale_show, *lease_show):
         seen.mark(x, today)
     seen.prune(today)
@@ -295,6 +389,7 @@ def run(args: argparse.Namespace) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="청약 블로그 원고 생성기")
     parser.add_argument("--preview", metavar="DIR", help="메일을 보내지 않고 DIR/<별칭>.html 로 저장 (발송 이력도 안 남김)")
+    parser.add_argument("--test", action="store_true", help="메일은 보내되 제목에 [시험]을 붙이고 발송 이력은 안 남김")
     parser.add_argument("--only", metavar="ALIAS", help="이 별칭들만 (쉼표로 여러 명)")
     parser.add_argument("--max", type=int, default=int(os.environ.get("BLOG_DAILY_MAX") or 3),
                         help="한 번에 보낼 원고 수 상한 (기본 3, 환경변수 BLOG_DAILY_MAX)")
@@ -312,6 +407,14 @@ if __name__ == "__main__":
         assert split_detail([1] * 5, [2]) == ([1] * 5, [2])
         assert split_detail([1], [2] * 9) == ([1], [2] * 5)
         assert split_detail([], [2] * 9) == ([], [2] * 6)
+        wrong = {"name": "산곡", "area_name": "인천", "coords": (37.1, 128.2),
+                 "market": {"lawd": "43150", "gap_pct": 193.0}, "presales": {"gap_pct": 26.0}}
+        assert len(drop_suspect_numbers([wrong])) == 1 and wrong["market"] is None and wrong["presales"]
+        odd = {"name": "x", "area_name": "인천", "coords": (37.5, 126.7), "market": {"lawd": "28237", "gap_pct": 120.0}}
+        assert len(drop_suspect_numbers([odd])) == 1 and odd["market"] is None
+        fine = {"name": "y", "area_name": "인천", "coords": (37.5, 126.7), "market": {"lawd": "28237", "gap_pct": 6.0}}
+        assert drop_suspect_numbers([fine]) == [] and fine["market"]
+        assert "위치를 찾지 못해" in str(drop_suspect_numbers([{"name": "z"}])[0])
         assert compact("인천계양 A17블록 신혼희망타운(공공분양)(본청약)") == "인천계양A17블록신혼희망타운"
         assert town("인천광역시 부평구 산곡동 10번지") == "부평" and town("경기도 수원시 영통구") == "수원"
         assert town("세종특별자치시 산울동") == "세종"

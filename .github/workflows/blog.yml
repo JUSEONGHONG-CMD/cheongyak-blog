@@ -29,6 +29,8 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install -r requirements.txt
+      # 썸네일 카드에 한글을 그리려면 한글 글꼴이 있어야 한다 (없으면 썸네일만 생략)
+      - run: sudo apt-get install -y -qq fonts-nanum
       - name: 원고 만들기·보내기
         env:
           TZ: Asia/Seoul
