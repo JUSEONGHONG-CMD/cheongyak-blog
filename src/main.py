@@ -278,7 +278,7 @@ def best_route(verdict) -> str:
 
 def post_title(blog: dict, top: dict, route: str, count: int, today: date) -> str:
     """네이버는 제목 앞쪽 단어를 검색에 크게 본다. 사람들이 찾는 단지명·전형을 앞에 둔다."""
-    name = plain_name(top["name"])[:28]
+    name = (lease_title(top["name"]) if "deadline" in top else plain_name(top["name"]))[:28]
     what = route if "특공" in route else "청약"  # '오피스텔 오피스텔 청약'처럼 단지명과 겹치지 않게
     return f"{name} {what} 자격 — {blog['label']} 기준 새 공고 {count}건 ({today.month}/{today.day})"
 
