@@ -148,6 +148,39 @@ def intro_html(alias: str, blog: dict, sale_show, lease_show, verdicts, count: i
     return f"<p style='font-size:15px;line-height:1.8'>{' '.join(lines)}</p>"
 
 
+def lease_title(name: str) -> str:
+    """LH 공고명을 카드에 맞게 줄인다: '[서울지역본부] 26년 2차 비분양전환형 든든전세주택 입주자 모집공고'
+    → '26년 2차 비분양전환형 든든전세주택'."""
+    name = re.sub(r"^\s*\[[^\]]*\]\s*", "", str(name))
+    return re.sub(r"\s*(추가|예비)?\s*(입주자|입주자격완화)?\s*(선착순\s*)?모집\s*(공고문?)?.*$", "", name).strip() or name
+
+
+def days_left(item: dict, today: date) -> int:
+    if "deadline" in item:  # LH 임대
+        return (item["deadline"] - today).days
+    return item["days_left"] if item.get("days_left") is not None else 999
+
+
+def card_text(blog: dict, sale_show, lease_show, verdicts, count: int, today: date) -> tuple[str, ...]:
+    """썸네일 카드 문구 (상단 띠, 기준일, 헤드라인, 마감 임박 단지, 전형·마감, 가까운 역)."""
+    soonest = min((*sale_show, *lease_show), key=lambda x: days_left(x, today))
+    route = (best_route(verdicts.get(applyhome_key(soonest))) if "deadline" not in soonest
+             else soonest["kind"].split("(")[0]).replace("❔", "")
+    if "deadline" in soonest:
+        # LH 임대는 여러 곳의 집을 한 공고로 뽑아 역이 하나로 정해지지 않는다. 지역·호수를 적는다
+        focus = f"마감 임박 공고 : {lease_title(soonest['name'])}"
+        houses = f" {soonest['houses']}호" if soonest.get("houses") else ""
+        footer = f"{soonest.get('region') or 'LH'} 일대{houses} 모집 · 집 위치는 공고문 확인"
+    else:
+        focus = f"마감 임박 단지 : {plain_name(soonest['name'])}"
+        station = soonest.get("subway") or {}
+        footer = (f"가까운 역 : {station['name']} 도보 {station['walk_min']}분" if station.get("name")
+                  else "가까운 지하철역 없음 (반경 2km)")
+    return (f"{blog['label']} 신청 가능 청약", f"{today.month}월 {today.day}일 기준", f"새 청약 공고 {count}건",
+            focus,
+            " · ".join(x for x in (route, dday(soonest)) if x), footer)
+
+
 def build_post(blog: dict, sale_show, verdicts, degraded, lease_show, rest, intro, today, images) -> str:
     """블로그 본문. 그래프는 images 에 {cid: png} 로 채운다."""
     facts = "".join(f"<li>{escape(f)}</li>" for f in blog.get("facts") or [])
@@ -308,12 +341,7 @@ def run_one(alias, profile, args, keys, cache, today) -> str | None:
     count = len(sale_new) + len(lease_new)
     intro = intro_html(alias, blog, sale_show, lease_show, verdicts, count, today)
     post = build_post(blog, sale_show, verdicts, degraded, lease_show, rest, intro, today, images)
-    top_item = (sale_show or lease_show)[0]
-    top_route = best_route(verdicts.get(applyhome_key(top_item))) if sale_show else top_item["kind"].split("(")[0]
-    card = thumbnail.card_png(blog["label"], f"새 청약 공고 {count}건",
-                              plain_name(top_item["name"]),
-                              " · ".join(x for x in (top_route, dday(top_item)) if x),
-                              f"{today.month}월 {today.day}일 · 가상 인물 맞춤 청약 정리")
+    card = thumbnail.card_png(*card_text(blog, sale_show, lease_show, verdicts, count, today))
     if card:  # 네이버는 첫 이미지를 검색 썸네일로 쓴다
         images["thumb@blog"] = card
         post = "<p><img src='cid:thumb@blog' width='540' alt='대표 이미지'></p>" + post
@@ -415,6 +443,8 @@ if __name__ == "__main__":
         fine = {"name": "y", "area_name": "인천", "coords": (37.5, 126.7), "market": {"lawd": "28237", "gap_pct": 6.0}}
         assert drop_suspect_numbers([fine]) == [] and fine["market"]
         assert "위치를 찾지 못해" in str(drop_suspect_numbers([{"name": "z"}])[0])
+        assert lease_title("[서울지역본부] 26년 2차 비분양전환형 든든전세주택 입주자 모집공고") == "26년 2차 비분양전환형 든든전세주택"
+        assert lease_title("양주회천 A25BL 영구임대주택 추가입주자 모집 공고('26.09.21)") == "양주회천 A25BL 영구임대주택"
         assert compact("인천계양 A17블록 신혼희망타운(공공분양)(본청약)") == "인천계양A17블록신혼희망타운"
         assert town("인천광역시 부평구 산곡동 10번지") == "부평" and town("경기도 수원시 영통구") == "수원"
         assert town("세종특별자치시 산울동") == "세종"
