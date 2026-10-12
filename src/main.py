@@ -323,6 +323,23 @@ def drop_suspect_numbers(items: list[dict]) -> list[validate.Issue]:
     return issues
 
 
+# docs/naver-seo.md 8장 '발행 전 1분 점검표'. 문서를 고치면 여기도 같이 고친다
+CHECKLIST = (
+    "<div style='border:1px solid #d6e4ff;background:#f5f8ff;border-radius:6px;padding:8px 12px;"
+    "font-size:12px;line-height:1.8;margin-bottom:12px'><b>발행 전 점검 (docs/naver-seo.md)</b><br>"
+    + "<br>".join("☐ " + item for item in (
+        "제목: 위 제목 복사, 과장 표현 없음",
+        "썸네일: 카드가 첫 이미지, 대표 이미지로 지정",
+        "검증 메모: '없음'이거나, 빨간 칸이면 공고문 확인 끝냄",
+        "본문: 표·이미지·링크 깨짐 없음",
+        "안내 문구: '가상 인물 · 판정은 참고용'이 맨 끝에 남아 있음",
+        "태그: 붙여넣음, 관계없는 키워드 없음",
+        "카테고리: 위 카테고리 선택",
+        "예약: 위 예약 시각으로 예약 (즉시 발행 아님)",
+    )) + "</div>"
+)
+
+
 def build_mail(blog: dict, title: str, tags: list[str], issues: list, post: str) -> str:
     """운영자용 메일: 위에는 발행 정보, 구분선 아래는 그대로 복사할 본문."""
     notes = "<br>".join(escape(str(i)) for i in issues) or "없음"
@@ -339,7 +356,8 @@ def build_mail(blog: dict, title: str, tags: list[str], issues: list, post: str)
         + (row.format("검증 메모", notes) if not issues else
            "<tr><td style='padding:4px 10px;color:#c33'><b>검증 메모</b></td>"
            f"<td style='padding:4px 10px;background:#fde8e8;color:#c33'><b>{notes}</b></td></tr>")
-        + "</table><p style='color:#c33;font-size:13px'>▼ 아래 선부터 끝까지 복사해 스마트에디터에 붙여 넣으세요 ▼</p>"
+        + "</table>" + CHECKLIST
+        + "<p style='color:#c33;font-size:13px'>▼ 아래 선부터 끝까지 복사해 스마트에디터에 붙여 넣으세요 ▼</p>"
         "<hr>" + post + "</body></html>"
     )
 
