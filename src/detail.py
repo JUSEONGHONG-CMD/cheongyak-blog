@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import re
+
 from datetime import date
 
 from . import strategy
@@ -36,6 +38,46 @@ def _grouped_areas(areas: list[float]) -> list[str]:
         (f"{g[0]:g}㎡" if len(g) == 1 else f"{g[0]:g}~{g[-1]:g}㎡") + f"({p}평)"
         for p, g in groups.items()
     ]
+
+
+def kind_word(item: dict) -> str:
+    """사람들이 검색하는 주택 유형 이름: 오피스텔·민간임대·공공분양 아파트 등."""
+    category = str(item.get("category") or "")
+    house = str(item.get("house_type") or "")
+    if category == "오피스텔등":
+        return house if house and house not in ("오피스텔등",) else "오피스텔"
+    if category == "공공지원민간임대":
+        return "공공지원 민간임대"
+    if category == "무순위":
+        return "무순위(줍줍) 물량"
+    if category == "임의공급":
+        return "임의공급(미분양) 물량"
+    return "공공분양 아파트" if any(w in house for w in ("국민", "공공")) else "민간분양 아파트"
+
+
+def areas_text(item: dict) -> str:
+    """'전용 59·84㎡(18·26평)'. 같은 평은 한 번만."""
+    areas = sorted({round(m["area"]) for m in (item.get("matched_models") or []) if m.get("area")})
+    if not areas:
+        return ""
+    pyeongs = list(dict.fromkeys(pyeong(a) for a in areas))
+    return f"전용 {'·'.join(map(str, areas))}㎡({'·'.join(map(str, pyeongs))}평)"
+
+
+def summary_sentence(item: dict) -> str:
+    """공고 카드 맨 위 한 줄. '옥포 힐스테이트 평수'처럼 단지명+속성으로 찾는 검색어가 문장에 들어가게 한다."""
+    from .validate import josa  # validate 가 detail 을 쓰지 않아 순환 import 없음
+
+    name = re.sub(r"\s*\([^)]*\)", "", str(item.get("name") or "")).strip()
+    parts = (item.get("address") or "").split()
+    where = " ".join(parts[:2]) if parts else str(item.get("area_name") or "")
+    kind = kind_word(item)
+    facts = [x for x in (areas_text(item), f"분양가 {price_span(item)}" if price_span(item) else "") if x]
+    end = max((d for d in (item.get("special_end"), item.get("general_end")) if d), default=None)
+    text = f"{name}{josa(name, '은')} {where}의 {kind}"
+    if facts:
+        text += f"{josa(kind, '으로')}, " + ", ".join(facts)
+    return text + (f"이며 {end.month}월 {end.day}일에 접수가 끝납니다." if end else "입니다.")
 
 
 def fmt_date(value) -> str:

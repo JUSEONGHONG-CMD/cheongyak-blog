@@ -329,6 +329,7 @@ def build_html(
             f"<h3 style='margin:0 0 6px;font-size:15px'>"
             f"<a href='{url}' style='color:#111;text-decoration:none'>"
             f"{escape(detail.title(item))}</a></h3>"
+            f"<p style='margin:4px 0 8px;font-size:14px;line-height:1.7'>{escape(detail.summary_sentence(item))}</p>"
             + link_bar(item, today)
             + detail_table(detail.body(item, verdict), {"시세": market_chart(item, images)})
             + "</div>"

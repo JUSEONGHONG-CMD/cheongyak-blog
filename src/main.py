@@ -100,8 +100,10 @@ def one_liner(item: dict, today: date) -> str:
         return (f"<li>[LH {escape(item['kind'])}] <a href='{escape(item['url'])}'>{escape(item['name'])}</a>"
                 f" · 마감 {item['deadline']:%m.%d} (D-{left})</li>")
     left = item.get("days_left")
-    return (f"<li>[분양 {escape(str(item.get('category') or ''))}] "
+    facts = [x for x in (detail.areas_text(item), detail.price_span(item)) if x]
+    return (f"<li>[{escape(detail.kind_word(item))}] "
             f"<a href='{escape((item.get('url') or '').strip())}'>{escape(str(item.get('name') or ''))}</a>"
+            + "".join(f" · {escape(f)}" for f in facts)
             + (f" · D-{left}" if left is not None else "") + "</li>")
 
 
@@ -123,7 +125,7 @@ def intro_html(alias: str, blog: dict, sale_show, lease_show, verdicts, count: i
     여는 문장을 인물·날짜로 돌리고, 나머지는 그날 공고 숫자로 채운다."""
     variant = (sum(map(ord, alias)) + today.toordinal()) % len(OPENINGS)
     lines = [OPENINGS[variant].format(m=today.month, d=today.day, label=blog["label"], n=count)]
-    if sale_show:
+    if sale_show:  # 글 맨 앞 문장이 단지명으로 시작하게 아래에서 맨 앞으로 옮긴다
         top = sale_show[0]
         route = best_route(verdicts.get(applyhome_key(top)))
         where = " · ".join(x for x in (str(top.get("area_name") or ""), dday(top)) if x)
@@ -136,7 +138,7 @@ def intro_html(alias: str, blog: dict, sale_show, lease_show, verdicts, count: i
             price = detail.price_span(top)
             line += (f" 분양가는 {price}{validate.josa(price, '으로')} 주변 시세보다 약 {abs(m['gap_pct']):.0f}% "
                      f"{side}니다.")
-        lines.append(line)
+        lines.insert(0, line)
         special = sum(1 for x in sale_show if "특공" in best_route(verdicts.get(applyhome_key(x))))
         if special > 1:
             lines.append(f"특별공급으로 넣을 수 있는 분양 공고는 {special}곳입니다.")
@@ -221,12 +223,13 @@ def card_text(alias: str, profile: dict, sale_show, lease_show, verdicts, today:
 def build_post(blog: dict, sale_show, verdicts, degraded, lease_show, rest, intro, today, images) -> str:
     """블로그 본문. 그래프는 images 에 {cid: png} 로 채운다."""
     facts = "".join(f"<li>{escape(f)}</li>" for f in blog.get("facts") or [])
+    # 원고마다 달라지는 도입부를 맨 앞에 둔다. 인물 소개는 글마다 같아, 앞에 오면 유사 문서로 보이기 쉽다
     out = [
+        intro,
         "<div style='background:#f6f8fa;border-radius:8px;padding:14px 18px;margin-bottom:20px'>"
         f"<p style='margin:0 0 6px'><b>👤 이 글의 모델 — {escape(blog['category'])}</b></p>"
         f"<p style='margin:0 0 6px'>{escape(blog.get('intro') or '')}</p>"
         f"<ul style='margin:0;padding-left:18px;font-size:14px'>{facts}</ul></div>",
-        intro,
     ]
     if sale_show:
         html = notify_email.build_html(sale_show, verdicts, today, degraded, applyhome_key, images)
@@ -275,10 +278,16 @@ def best_route(verdict) -> str:
 
 
 def post_title(blog: dict, top: dict, route: str, count: int, today: date) -> str:
-    """네이버는 제목 앞쪽 단어를 검색에 크게 본다. 사람들이 찾는 단지명·전형을 앞에 둔다."""
-    name = (lease_title(top["name"]) if "deadline" in top else plain_name(top["name"]))[:28]
-    what = route if "특공" in route else "청약"  # '오피스텔 오피스텔 청약'처럼 단지명과 겹치지 않게
-    return f"{name} {what} 자격 — {blog['label']} 기준 새 공고 {count}건 ({today.month}/{today.day})"
+    """네이버는 제목 앞쪽 단어를 검색에 크게 본다. 유입 검색어가 '단지명 + 평수·오피스텔·민간임대'
+    꼴이라(2026-10-13 통계) 단지명 다음에 유형과 평수·분양가를 둔다. count 는 본문 도입부에 있다."""
+    when = f"({blog['label']} 기준, {today.month}/{today.day})"
+    if "deadline" in top:  # LH 임대
+        return f"{lease_title(top['name'])[:28]} {top['kind'].split('(')[0]} 보증금·입주 자격 {when}"
+    name = plain_name(top["name"])[:28]
+    kind = detail.kind_word(top).split("(")[0].replace(" 물량", "")
+    kind = "" if kind.split()[-1] in name else kind  # '… 오피스텔 오피스텔'처럼 겹치지 않게
+    what = f"{route} 자격" if "특공" in route else "청약 자격"
+    return " ".join(x for x in (name, kind, "평수·분양가·" + what, when) if x)
 
 
 def post_tags(blog: dict, sale_show: list, lease_show: list, verdicts: dict, today: date) -> list[str]:
@@ -286,6 +295,9 @@ def post_tags(blog: dict, sale_show: list, lease_show: list, verdicts: dict, tod
     tags = list(blog.get("tags") or [])[:6]
     for x in sale_show:
         tags.append(compact(x["name"]))
+        block = re.search(r"([A-Za-z]{1,2}\d+(?:-\d+)?)\s*(?:블록|BL)", str(x["name"]))
+        if block:  # '의왕청계2 a1' 처럼 블록명으로 찾는 검색어
+            tags.append(compact(str(x["name"]).split()[0]) + block.group(1).upper())
         if town(x.get("address")):
             tags.append(f"{town(x['address'])}청약")
         route = best_route(verdicts.get(applyhome_key(x)))
@@ -559,6 +571,14 @@ if __name__ == "__main__":
         buf = io.StringIO()
         Redacted(buf).write("GET /api?serviceKey=abc%2Bdef&page=1 실패")
         assert buf.getvalue() == "GET /api?serviceKey=***&page=1 실패", buf.getvalue()
+        from .detail import summary_sentence
+        s = summary_sentence({"name": "옥포 힐스테이트", "address": "경상남도 거제시 옥포동 1", "category": "APT",
+                              "house_type": "민영", "matched_models": [{"area": 59.9}, {"area": 84.9}],
+                              "price_min": 310_000_000, "price_max": 420_000_000, "general_end": date(2026, 10, 20)})
+        assert s == "옥포 힐스테이트는 경상남도 거제시의 민간분양 아파트로, 전용 60·85㎡(18·26평), 분양가 3.1~4.2억이며 10월 20일에 접수가 끝납니다.", s
+        t = post_title({"label": "사회초년생"}, {"name": "당산역 더클래스 한강", "category": "오피스텔등",
+                        "house_type": "오피스텔"}, "오피스텔 청약", 1, date(2026, 10, 12))
+        assert t == "당산역 더클래스 한강 오피스텔 평수·분양가·청약 자격 (사회초년생 기준, 10/12)", t
         assert compact("인천계양 A17블록 신혼희망타운(공공분양)(본청약)") == "인천계양A17블록신혼희망타운"
         assert town("인천광역시 부평구 산곡동 10번지") == "부평" and town("경기도 수원시 영통구") == "수원"
         assert town("세종특별자치시 산울동") == "세종"
