@@ -206,7 +206,6 @@ def card_text(alias: str, profile: dict, sale_show, lease_show, verdicts, today:
         checks = CHECKS.get(route, LOOSE_CHECKS)
         sure = bool(verdict and verdict.possible)
         name = plain_name(soonest["name"])
-    household = profile.get("household") or {}
     left = days_left(soonest, today)
     number = int(re.sub(r"\D", "", alias.split("-")[0]) or 0)
     return {
@@ -556,6 +555,10 @@ if __name__ == "__main__":
         assert "위치를 찾지 못해" in str(drop_suspect_numbers([{"name": "z"}])[0])
         assert lease_title("[서울지역본부] 26년 2차 비분양전환형 든든전세주택 입주자 모집공고") == "26년 2차 비분양전환형 든든전세주택"
         assert lease_title("양주회천 A25BL 영구임대주택 추가입주자 모집 공고('26.09.21)") == "양주회천 A25BL 영구임대주택"
+        import io
+        buf = io.StringIO()
+        Redacted(buf).write("GET /api?serviceKey=abc%2Bdef&page=1 실패")
+        assert buf.getvalue() == "GET /api?serviceKey=***&page=1 실패", buf.getvalue()
         assert compact("인천계양 A17블록 신혼희망타운(공공분양)(본청약)") == "인천계양A17블록신혼희망타운"
         assert town("인천광역시 부평구 산곡동 10번지") == "부평" and town("경기도 수원시 영통구") == "수원"
         assert town("세종특별자치시 산울동") == "세종"
