@@ -6,8 +6,8 @@
     │ (인물) 모델 03          10월 12일 기준 │  파란 띠
     │        맞벌이 신혼부부                 │
     ├──────────────────────────────────┤
-    │ 이 청약                              │
-    │ 넣을 수 있어요                        │  큰 제목
+    │ 의왕역 한신더휴                       │
+    │ 지원할 수 있어요                      │  큰 제목 (단지명 + 판정)
     │ ☑ 무주택 세대구성원        ( 신청 )   │
     │ ☑ 혼인 7년 이내            ( 가능 )   │  조건 3줄 + 도장
     │ ☑ 청약통장 6개월 이상                 │
@@ -94,7 +94,9 @@ def _people(ax, icons: list[str], senior: bool) -> float:
 
 
 def card_png(model_no: int, label: str, date_line: str, checks: list[str], stamp: str,
-             name: str, dday: str, icons: list[str] = ("man",), senior: bool = False) -> bytes | None:
+             name: str, dday: str, icons: list[str] = ("man",), senior: bool = False,
+             verb: str = "지원할 수 있어요", facts: str = "") -> bytes | None:
+    """name 은 큰 제목 첫 줄(단지명), verb 는 둘째 줄, facts 는 검은 띠(유형·평수·분양가)."""
     """1080×1080 카드. 글꼴이 없으면 None."""
     font = korean_font()
     if not font:
@@ -129,8 +131,10 @@ def card_png(model_no: int, label: str, date_line: str, checks: list[str], stamp
 
     # 큰 제목
     bold = 0 if heavy != font else 3
-    write(0.05, 0.705, "이 청약", 54, INK, weight="heavy", family=heavy, thick=bold)
-    write(0.05, 0.565, "넣을 수 있어요", 54, INK, weight="heavy", family=heavy, thick=bold)
+    # 단지명은 길이가 제각각이라 폭에 맞춰 줄인다(write 가 처리). 너무 길면 뒤를 말줄임
+    title = name if len(name) <= 16 else name[:15] + "…"
+    write(0.05, 0.705, title, 54, INK, weight="heavy", family=heavy, thick=bold, limit=0.93)
+    write(0.05, 0.565, verb, 54, INK, weight="heavy", family=heavy, thick=bold)
 
     # 조건 3줄: 파란 체크 상자 + 문구 (도장 자리까지)
     for i, text in enumerate(checks[:3]):
@@ -152,7 +156,7 @@ def card_png(model_no: int, label: str, date_line: str, checks: list[str], stamp
 
     # 검은 띠: 단지명 · D-day
     ax.add_patch(Rectangle((0, 0), 1, 0.095, facecolor=INK, edgecolor="none"))
-    write(0.05, 0.0475, name, 21, "white", limit=0.76)
+    write(0.05, 0.0475, facts or name, 21, "white", limit=0.76)
     write(0.95, 0.0475, dday, 27, YELLOW, weight="heavy", family=heavy, ha="right", thick=bold)
 
     buf = io.BytesIO()
@@ -163,6 +167,7 @@ def card_png(model_no: int, label: str, date_line: str, checks: list[str], stamp
 if __name__ == "__main__":
     png = card_png(3, "맞벌이 신혼부부", "10월 12일 기준",
                    ["무주택 세대구성원", "혼인 7년 이내", "청약통장 6개월 이상"], "신청 가능",
-                   "○○지구 신혼희망타운", "D-3", icons=["woman", "man", "girl", "boy"])
+                   "의왕역 한신더휴", "D-6", icons=["woman", "man", "girl", "boy"],
+                   facts="무순위 · 전용 84㎡(26평) · 9.4억")
     assert png is None or png[:4] == b"\x89PNG"
     print("ok" if png else "ok (한글 글꼴 없음 → 썸네일 생략)")

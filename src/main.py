@@ -195,24 +195,29 @@ def family_icons(profile: dict) -> list[str]:
 
 
 def card_text(alias: str, profile: dict, sale_show, lease_show, verdicts, today: date) -> dict:
-    """썸네일 카드 인자. 대표는 상세에 실린 공고 중 마감이 가장 빠른 곳."""
-    soonest = min((*sale_show, *lease_show), key=lambda x: days_left(x, today))
+    """썸네일 카드 인자. 대표는 제목·도입부와 같은 공고(상세 첫 공고)."""
+    soonest = (sale_show or lease_show)[0]
     if "deadline" in soonest:  # LH 임대
         kind = soonest["base_kind"] if soonest.get("base_kind") in CHECKS else soonest["kind"].split("(")[0]
         checks = CHECKS.get(kind, LEASE_CHECKS)
         sure = soonest.get("sure", True)  # 상세 유형(든든전세·청년·신혼Ⅱ)은 who 로 이미 걸렀다
         name = lease_title(soonest["name"])
+        facts = " · ".join(x for x in (soonest["kind"].split("(")[0], soonest.get("region"),
+                                       f"{soonest['houses']}호" if soonest.get("houses") else "") if x)
     else:
         verdict = verdicts.get(applyhome_key(soonest))
         route = best_route(verdict).replace("❔", "")
         checks = CHECKS.get(route, LOOSE_CHECKS)
         sure = bool(verdict and verdict.possible)
         name = plain_name(soonest["name"])
+        kind = detail.kind_word(soonest).split("(")[0].replace(" 물량", "")
+        facts = " · ".join(x for x in (kind, detail.areas_text(soonest), detail.price_span(soonest)) if x)
     left = days_left(soonest, today)
     number = int(re.sub(r"\D", "", alias.split("-")[0]) or 0)
     return {
         "model_no": number, "label": profile["blog"]["label"], "date_line": f"{today.month}월 {today.day}일 기준",
         "checks": list(checks), "stamp": "신청 가능" if sure else "확인 필요", "name": name,
+        "verb": "지원할 수 있어요" if sure else "확인해 보세요", "facts": facts,
         "dday": f"D-{left}" if left < 999 else "",
         "icons": family_icons(profile),
         "senior": any((p.get("birth_date") or "9999") < f"{today.year - 60}"
