@@ -510,7 +510,22 @@ def run(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+class Redacted:
+    """출력에서 serviceKey= 뒤 값을 지운다. 공개 저장소의 Actions 로그는 누구나 보고, 조회 실패 메시지에는
+    키가 붙은 요청 주소가 통째로 찍힌다. GitHub 시크릿 가림에만 기대지 않으려고 출력 단계에서 한 번 더 지운다."""
+
+    def __init__(self, stream):
+        self.stream = stream
+
+    def write(self, text):
+        return self.stream.write(re.sub(r"(serviceKey=)[^&\s'\"]+", r"\1***", text))
+
+    def __getattr__(self, name):
+        return getattr(self.stream, name)
+
+
 def main() -> int:
+    sys.stdout, sys.stderr = Redacted(sys.stdout), Redacted(sys.stderr)
     parser = argparse.ArgumentParser(description="청약 블로그 원고 생성기")
     parser.add_argument("--preview", metavar="DIR", help="메일을 보내지 않고 DIR/<별칭>.html 로 저장 (발송 이력도 안 남김)")
     parser.add_argument("--test", action="store_true", help="메일은 보내되 제목에 [시험]을 붙이고 발송 이력은 안 남김")
