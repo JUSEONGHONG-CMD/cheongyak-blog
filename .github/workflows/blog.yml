@@ -47,7 +47,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A data
+          git add -A data public  # public/ = 원고 이미지(공개 주소로 블로그에 붙음)
           if git diff --staged --quiet; then echo "변경 없음"; else
             git commit -m "chore: 원고 이력 갱신 $(TZ=Asia/Seoul date +%Y-%m-%d)"
             git pull --rebase --autostash
