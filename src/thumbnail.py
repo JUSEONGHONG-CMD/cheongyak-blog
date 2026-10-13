@@ -93,11 +93,24 @@ def _people(ax, icons: list[str], senior: bool) -> float:
     return x
 
 
+def short_name(name: str, limit: int = 16) -> str:
+    """카드 큰 제목용 단지명. 길면 띄어쓰기 단위로 앞쪽만 남긴다(단어 중간에서 자르지 않음)."""
+    if len(name) <= limit:
+        return name
+    kept = ""
+    for word in name.split():
+        if len(f"{kept} {word}".strip()) > limit:
+            break
+        kept = f"{kept} {word}".strip()
+    return kept or name[: limit - 1] + "…"
+
+
 def card_png(model_no: int, label: str, date_line: str, checks: list[str], stamp: str,
              name: str, dday: str, icons: list[str] = ("man",), senior: bool = False,
              verb: str = "지원할 수 있어요", facts: str = "") -> bytes | None:
-    """name 은 큰 제목 첫 줄(단지명), verb 는 둘째 줄, facts 는 검은 띠(유형·평수·분양가)."""
-    """1080×1080 카드. 글꼴이 없으면 None."""
+    """1080×1080 카드. 글꼴이 없으면 None.
+
+    name 은 큰 제목 첫 줄(단지명), verb 는 둘째 줄, facts 는 검은 띠(유형·평수·분양가)."""
     font = korean_font()
     if not font:
         return None
@@ -131,8 +144,8 @@ def card_png(model_no: int, label: str, date_line: str, checks: list[str], stamp
 
     # 큰 제목
     bold = 0 if heavy != font else 3
-    # 단지명은 길이가 제각각이라 폭에 맞춰 줄인다(write 가 처리). 너무 길면 뒤를 말줄임
-    title = name if len(name) <= 16 else name[:15] + "…"
+    # 단지명은 길이가 제각각이라 폭에 맞춰 줄인다(write 가 처리). 너무 길면 띄어쓰기 단위로 앞쪽만
+    title = short_name(name)
     write(0.05, 0.705, title, 54, INK, weight="heavy", family=heavy, thick=bold, limit=0.93)
     write(0.05, 0.565, verb, 54, INK, weight="heavy", family=heavy, thick=bold)
 
