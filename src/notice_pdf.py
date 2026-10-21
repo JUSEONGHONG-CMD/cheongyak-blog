@@ -29,7 +29,8 @@ HEADERS = {"User-Agent": "Mozilla/5.0"}
 PAGES = 12
 
 LINK = re.compile(r"""(?is)<a[^>]*href=['"]([^'"]*getAtchmnfl\.do[^'"]*)['"][^>]*>[^<]*공고문""")
-TOTAL = re.compile(r"총\s*([\d,]+)\s*세대")
+UNIT = r"(?:세대|호실|실)"
+TOTAL = re.compile(r"총\s*([\d,]+)\s*" + UNIT)
 DONG = re.compile(r"(\d+)\s*개\s*동")
 SCALE = re.compile(r"공급\s*규모")
 
@@ -57,11 +58,13 @@ def parse_scale(text: str) -> tuple[int, int]:
 
     for match in SCALE.finditer(text):
         line = text[match.start():].split("\n", 1)[0]
+        if not re.search(r"총\s*" + UNIT, line):  # '총 계약 2회' 같은 줄에서 동 수를 세대수로 읽지 않는다
+            continue
         head, sep, _ = line.partition("총")
         numbers = re.findall(r"\d[\d,]*", line.split(":", 1)[-1])
         units = re.findall(r"층|동", head)
         if sep and ":" in line and len(units) < len(numbers):
-            dongs = int(numbers[len(units) - 1]) if units and units[-1] == "동" else 0
+            dongs = int(numbers[len(units) - 1].replace(",", "")) if units and units[-1] == "동" else 0
             return int(numbers[len(units)].replace(",", "")), dongs
     return 0, 0
 
@@ -80,8 +83,9 @@ def _pdf_scale(url: str) -> tuple[int, int] | None:
             found = parse_scale(page.extract_text() or "")
             if found[0]:
                 return found
-    except Exception as exc:  # 깨진 PDF 는 pypdf 가 여러 종류의 예외를 낸다
+    except Exception as exc:  # 깨진 PDF 는 pypdf 가 여러 종류의 예외를 낸다. 캐시에 남지 않게 None
         print(f"[경고] 모집공고문 읽기 실패: {exc}", file=sys.stderr)
+        return None
     return 0, 0
 
 
@@ -159,11 +163,13 @@ def read_scale(item: dict, service_key: str) -> tuple[int, int] | None:
 
 def enrich(items: list[dict], service_key: str, cache=None) -> None:
     for item in items:
-        key = f"scale:{item['house_manage_no']}:{item['pblanc_no']}"
+        key = f"scale2:{item['house_manage_no']}:{item['pblanc_no']}"
         hit = cache.get(key) if cache is not None else None
         if hit is None:
             result = read_scale(item, service_key)
             hit = list(result or (0, 0))
+            if not hit[0] and cache is not None:  # PDF 가 사라진 공고는 옛 값을 대신 쓴다
+                hit = cache.get(key.replace("scale2:", "scale:")) or hit
             if cache is not None and result is not None:
                 cache.set(key, hit)
         item["complex_units"], item["complex_dongs"] = hit
@@ -179,9 +185,19 @@ def prune(cache, today: date | None = None) -> int:
     oldest = (today or date.today()).year - 2
     dropped = 0
     for key in cache.keys():
-        if key.startswith("scale:"):
+        if key.startswith(("scale:", "scale2:")):
             year = key.split(":")[1][:4]
             if year.isdigit() and int(year) < oldest:
                 cache.drop(key)
                 dropped += 1
     return dropped
+
+
+def selfcheck() -> None:
+    assert parse_scale("공급규모 : 지하 2층 지상 35층 18개동 총 853세대 중 일반분양 143세대") == (853, 18)
+    assert parse_scale("공급규모 총 1,149세대 중 일반분양 143세대") == (1149, 0)
+    assert parse_scale("공급규모 : 지하 1층 지상 12층 1개동 총 56호실") == (56, 1)
+    # 글자와 숫자가 따로 뽑힌 PDF: '지하 층 지상 층 개동 총 세대 중 … : 2, 35, 2, 64, 2' (층 2개 뒤 동 수, 그다음 세대수)
+    assert parse_scale("공급규모 지하 층 지상 층 개동 총 세대 중 : 2, 35, 2, 64") == (64, 2)
+    assert parse_scale("공급규모 지하 층 지상 층 개동 총 세대 중 : 3, 25, 12, 1,009") == (1009, 12)
+    assert parse_scale("공급규모 : 3개동 총 계약 2회") == (0, 0)  # 단위가 세대·호실·실이 아니면 읽지 않는다

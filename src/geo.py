@@ -95,15 +95,32 @@ def _report_http_error(exc: requests.HTTPError) -> None:
         print(f"       {body[:200]}", file=sys.stderr)
 
 
-def geocode(address: str, rest_key: str, cache: GeoCache | None = None, sido: str = "") -> tuple[float, float] | None:
+def _admin(token: str) -> bool:
+    return token.endswith(("도", "시", "군", "구", "읍", "면", "동", "리"))
+
+
+def city_of(address: str) -> str:
+    """주소의 시·군 이름('경기도 화성특례시 …' → '화성'). 광역시의 구는 보지 않는다(2026-07 인천 구 개편).
+
+    첫 쉼표 앞에서 '…도' 바로 뒤의 시/군만 본다. 여러 지역을 늘어놓은 주소는 맨 앞이 공급지역이다.
+    """
+    tokens = re.sub(r"[()\[\]]", " ", (address or "").split(",")[0]).split()
+    for prev, token in zip(tokens, tokens[1:]):
+        if prev.endswith("도") and token.endswith(("시", "군")) and _admin(token):
+            return re.sub(r"(특례시|시|군)$", "", token)
+    return ""
+
+
+def geocode(address: str, rest_key: str, cache: GeoCache | None = None, sido: str = "", city: str = "") -> tuple[float, float] | None:
     """주소 → (위도, 경도). 주소 검색이 실패하면 키워드 검색으로 한 번 더 시도한다.
 
     sido('인천' 등)를 주면 그 시·도 결과만 받는다. 공고 원문을 키워드 검색하면 다른 지방의
-    장소가 첫 결과로 오기도 해서다(부평 산곡동 공고 → 충북 제천).
+    장소가 첫 결과로 오기도 해서다(부평 산곡동 공고 → 충북 제천). city(시·군)까지 주면 같은 도 안의
+    같은 이름 동(다른 시)도 걸러낸다.
     """
     if not address:
         return None
-    key = f"geo:{sido}:{address}" if sido else f"geo:{address}"
+    key = f"geo:{sido}:{city}:{address}"
     if cache and (hit := cache.get(key)) is not None:
         return tuple(hit) if hit else None
 
@@ -125,7 +142,8 @@ def geocode(address: str, rest_key: str, cache: GeoCache | None = None, sido: st
         except requests.RequestException as exc:
             print(f"[경고] 지오코딩 네트워크 오류: {exc}", file=sys.stderr)
             documents = []
-        doc = next((d for d in documents if (d.get("address_name") or "").startswith(sido)), None)
+        doc = next((d for d in documents if (d.get("address_name") or "").startswith(sido)
+                    and city in (d.get("address_name") or "")), None)
         if doc:
             result = (float(doc["y"]), float(doc["x"]))
             break
@@ -259,9 +277,11 @@ def address_candidates(address: str, name: str = "") -> list[str]:
     # 괄호 안에는 실제 지번 주소(김포 예)가 들기도, 사업명이 들기도 한다. 사업명은 키워드 검색에서
     # 다른 지방 장소가 걸리므로('산곡6 주택재개발정비사업' → 제천), 주소처럼 생긴 괄호 → 괄호·'일원'을
     # 뺀 원문 → 나머지 괄호 순으로 본다.
-    inners = [i.strip() for i in re.findall(r"\(([^)]*)\)", address) if i.strip()]
+    # 한글이 없는 괄호('[동탄(1) M1-1-2블록]' 의 '(1)')는 후보로 쓰지 않는다.
+    inners = [i.strip() for i in re.findall(r"\(([^)]*)\)", address) if re.search("[가-힣]", i)]
     looks_address = [i for i in inners if re.search(r"\S(시|군|구|동|읍|면|리)\s", i + " ")]
-    bare = re.sub(r"\s+", " ", re.sub(r"\([^)]*\)", " ", address).replace("일원", " ")).strip()
+    # 카카오는 '산곡동 10번지' 는 못 찾고 '산곡동 10' 은 찾는다. 대괄호 블록명도 뺀다.
+    bare = re.sub(r"\s+", " ", re.sub(r"\([^)]*\)|\[[^\]]*\]|일원|번지", " ", address)).strip()
     for candidate in (*looks_address, bare, *inners):
         if candidate and candidate not in candidates:
             candidates.append(candidate)
@@ -271,11 +291,12 @@ def address_candidates(address: str, name: str = "") -> list[str]:
 
     # 마지막 수단: 행정구역 토큰만 남겨 동네 좌표라도 얻는다.
     # 괄호를 지우지 않고 원문 전체에서 뽑아야 괄호 안 주소도 살릴 수 있다.
-    tokens = re.sub(r"[()]", " ", address).split()
-    admin = [t for t in tokens if t.endswith(("도", "시", "군", "구", "읍", "면", "동", "리"))]
-    simplified = " ".join(admin[:4])
-    if simplified and simplified not in candidates:
-        candidates.append(simplified)
+    # 한 단계씩 줄여 가며 시도한다(읍·면·동까지 안 잡히면 시·군·구라도).
+    admin = [t for t in re.sub(r"[()]", " ", address).split() if _admin(t)][:4]
+    for size in range(len(admin), 1, -1):
+        simplified = " ".join(admin[:size])
+        if simplified not in candidates:
+            candidates.append(simplified)
 
     return candidates
 
@@ -285,8 +306,10 @@ def enrich(items: list[dict], rest_key: str, cache: GeoCache) -> None:
     for item in items:
         candidates = address_candidates(item.get("address") or "", item.get("name") or "")
         coords = None
+        sido = (item.get("area_name") or "").strip()
+        city = city_of(item.get("address") or "") if sido else ""
         for index, candidate in enumerate(candidates):
-            coords = geocode(candidate, rest_key, cache, (item.get("area_name") or "").strip())
+            coords = geocode(candidate, rest_key, cache, sido, city)
             if coords:
                 # 원문이 아닌 후보로 찾았다면 좌표가 대략적이라는 뜻이다
                 item["coords_approximate"] = index > 0
@@ -295,3 +318,15 @@ def enrich(items: list[dict], rest_key: str, cache: GeoCache) -> None:
         item["subway"] = (
             nearest_subway(coords[0], coords[1], rest_key, cache) if coords else None
         )
+
+
+def selfcheck() -> None:
+    assert city_of("경기도 화성특례시 동탄지구 [동탄(1) M1-1-2블록]") == "화성"
+    assert city_of("인천 서구 검단동 1") == "" and city_of("세종특별자치시 산울동") == ""
+    assert city_of("경기도 김포시 사우동 527-1 일원") == "김포"
+    assert city_of("인천 계양구 귤현동, 경기도 부천시 대장동, 서울 강서구 마곡동") == ""
+    assert city_of("광주연구개발특구 첨단3지구") == ""
+    got = address_candidates("경기도 화성시 동탄지구 [동탄(1) M1-1-2블록] 산곡동 10번지 일원")
+    assert not any(c == "1" for c in got) and any(c.endswith("산곡동 10") for c in got), got
+    steps = address_candidates("경기도 용인시 처인구 원삼면 목신리 D1-1BL")
+    assert "경기도 용인시 처인구 원삼면" in steps and "경기도 용인시 처인구" in steps, steps

@@ -38,6 +38,11 @@ CONTRACT = re.compile(r"계약금\s*[:：]?\s*(?:기본)?임대보증금의\s*(\
 ANNOUNCE = re.compile(r"(\d{1,2})\.(\d{1,2})\s*\([월화수목금토일]\)\s*별도\s*안내")
 # 단지형 공고문: '발표일 : 2026.12.28.(월)' · '[발표일 : ’27.01.06.(수)'. 서류제출대상자 발표가 먼저라 가장 늦은 날을 쓴다.
 ANNOUNCE_DATED = re.compile(r"발표일\s*:?\s*[’'‘]?(\d{4}|\d{2})\.\s*(\d{1,2})\.\s*(\d{1,2})")
+# 일정표 형식: "’26.12.10(목) … 별도 안내" (일 뒤에 점이 없고 날짜와 '별도 안내' 사이에 글이 낀다)
+ANNOUNCE_TABLE = re.compile(r"[’'‘](\d{2})\.(\d{1,2})\.(\d{1,2})\.?\s*\([월화수목금토일]\)[^’'‘]{0,60}?"
+                            r"(?:[’'‘]\d{2}\.\s*\d{1,2}월\s*중\s*)?별도\s*안내")
+# 든든전세: "당첨자 발표 12.11(금)". 연도가 없어 마감일로 추정한다.
+ANNOUNCE_WINNER = re.compile(r"당첨자\s*발표\s*(\d{1,2})\.(\d{1,2})\.?\s*\([월화수목금토일]\)")
 # 공고문 공통 문구: '계약체결 후 90일 이내에 입주를 완료하여야 합니다.'
 MOVE_IN_DAYS = 90
 XLSX_NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
@@ -87,7 +92,9 @@ def collect(service_key: str, today: date, regions: set[str]) -> list[dict]:
         deadline = parse_date(row.get("CLSG_DT"))
         found = lease_rules.classify(str(row.get("AIS_TP_CD_NM") or ""), name)
         where = lease_rules.sido(str(row.get("CNP_CD_NM") or ""))
-        if not found or not (where == "전국" or where in regions) or not deadline or deadline < today:
+        # '대구광역시 외' 처럼 여러 시·도를 묶은 공고: 공고명에 희망 시·도가 들어 있으면 받는다
+        named = "외" in str(row.get("CNP_CD_NM") or "") and any(r in name for r in regions)
+        if not found or not (where == "전국" or where in regions or named) or not deadline or deadline < today:
             continue
         key = name.replace("[정정공고]", "").strip()
         if key not in latest or str(row.get("PAN_DT")) > str(latest[key]["notice"]):
@@ -150,11 +157,12 @@ def _labels(rows: list[dict[str, str]]) -> dict[str, str]:
     first = next((i for i, r in enumerate(rows) if _is_data(r)), len(rows))
     header = []
     for row in reversed(rows[:first]):
-        if len(row) >= 2:
+        filled = sum(1 for v in row.values() if v)
+        if filled >= 2:
             header.insert(0, row)
             if len(header) == 3:
                 break
-        elif row:
+        elif filled:
             break
     columns = sorted({k for r in [*header, *rows[first:first + 1]] for k in r}, key=_col)
     labels = {}
@@ -181,7 +189,8 @@ def _columns(labels: dict[str, str]) -> dict[str, str]:
         return next((k for k, v in labels.items() if test(v)), "")
 
     deposits = [k for k, v in labels.items()
-                if "임대보증금" in v and not re.search("상한|하한|최대전환", v)]
+                if ("임대보증금" in v or (v.endswith("보증금") and "무보증" not in v))
+                and not re.search("상한|하한|최대전환", v)]
 
     def score(k: str) -> int:
         return bool(re.search(r"초과|2[·,]?3?순위", labels[k]))
@@ -192,13 +201,13 @@ def _columns(labels: dict[str, str]) -> dict[str, str]:
     def rent_of(column: str) -> str:
         # 월세는 보증금 바로 오른쪽 열이다(모든 양식 공통)
         return next((k for k, v in labels.items()
-                     if column and _col(k) == _col(column) + 1 and "월임대료" in v), "")
+                     if column and _col(k) == _col(column) + 1 and ("월임대료" in v or v.endswith(")임대료"))), "")
 
     return {
         # '지번주소'보다 '도로명주소'가 지오코딩이 정확하다
         "address": find(lambda v: v.endswith("도로명주소")) or find(lambda v: v.endswith("주소") and "지번" not in v),
         "name": find(lambda v: "모집단위" in v or v.endswith(("주택군", "주택군이름"))),
-        "area": find(lambda v: "전용면적" in v),
+        "area": find(lambda v: "전용면적" in v) or find(lambda v: "면적" in v and v.endswith("전용")),
         "deposit": deposit,
         "rent": rent_of(deposit),
         "deposit_low": deposit_low,
@@ -252,6 +261,10 @@ def announce_date(text: str, deadline: date) -> date | None:
     match = ANNOUNCE.search(text)
     if not match:
         dated = [date(int(y) + (2000 if len(y) == 2 else 0), int(m), int(d)) for y, m, d in ANNOUNCE_DATED.findall(text)]
+        if not [d for d in dated if d >= deadline]:
+            # '발표일 :' 표기가 없는 공고만. 있는 공고에 쓰면 일정표의 전자계약일('별도 안내 예정' 앞)을 발표일로 잘못 읽는다
+            dated += [date(2000 + int(y), int(m), int(d)) for y, m, d in ANNOUNCE_TABLE.findall(text)]
+            dated += [date(deadline.year + (int(m) < deadline.month), int(m), int(d)) for m, d in ANNOUNCE_WINNER.findall(text)]
         dated = [d for d in dated if d >= deadline]
         return max(dated) if dated else None
     month, day = int(match.group(1)), int(match.group(2))
@@ -262,6 +275,14 @@ def announce_date(text: str, deadline: date) -> date | None:
 def _cells(row_html: str) -> list[str]:
     return [re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", c)).strip()
             for c in re.findall(r"(?s)<t[hd][^>]*>(.*?)</t[hd]>", row_html)]
+
+
+def _recipients_only(label: str) -> bool:
+    """수급자 전용 주택형인가. '25A(대학생,청년,…,주거급여수급자,고령자)' 처럼 여러 계층이 같이 쓰는 형은 아니다."""
+    if "수급" not in label:
+        return False
+    parts = [p for group in re.findall(r"\(([^)]*)\)", label) for p in group.split(",")]
+    return not any("수급" in p for p in parts) or all("수급" in p for p in parts)
 
 
 def complexes(page: str) -> list[dict]:
@@ -276,16 +297,16 @@ def complexes(page: str) -> list[dict]:
         name = re.search(r'(?s)<h4[^>]*>(.*?)</h4>', block)
         address = re.search(r"소재지\s*:\s*([^<]+)", block)
         table = re.search(r"(?s)<thead>(.*?)</thead>\s*<tbody>(.*?)</tbody>", block)
-        if not (name and address and table):
+        if not (name and address):
             continue
-        head = _cells(table.group(1))
+        head = _cells(table.group(1)) if table else []
         col = {key: next((i for i, h in enumerate(head) if h.startswith(key)), None)
                for key in ("주택형", "전용면적", "금회공급", "임대보증금", "월임대료")}
         house = {"address": address.group(1).strip(), "name": _cells(f"<td>{name.group(1)}</td>")[0],
                  "units": 0, "areas": [], "deposits": [], "rents": [], "deposits_low": [], "rents_low": []}
-        for row in re.findall(r"(?s)<tr>(.*?)</tr>", table.group(2)):
+        for row in re.findall(r"(?s)<tr>(.*?)</tr>", table.group(2) if table else ""):
             cells = _cells(row)
-            if not cells or "수급자" in cells[0]:
+            if not cells or len(cells) < 3 or _recipients_only(cells[0]):
                 continue
             num = lambda key: (lambda v: float(v) if v else None)(
                 re.sub(r"[^\d.]", "", cells[col[key]]) if col[key] is not None and col[key] < len(cells) else "")
@@ -295,9 +316,17 @@ def complexes(page: str) -> list[dict]:
             if num("임대보증금"):
                 house["deposits"].append(num("임대보증금"))
                 house["rents"].append(num("월임대료") or 0)
+        if not house["areas"]:
+            # '주택형 데이터가 없습니다' 인 단지: 단지 정보의 '전용면적(㎡) : 26.37~31.32' 를 면적으로 쓴다
+            info = re.search(r"전용면적\(㎡\)\s*:\s*([\d.]+)(?:\s*~\s*([\d.]+))?", re.sub(r"<[^>]+>", " ", block))
+            if info:
+                house["areas"] = [float(v) for v in info.groups() if v]
+                house["from_info"] = True
         if house["areas"]:
             out.append(house)
-    return out
+    # 같은 단지가 표 있는 블록과 빈 블록으로 두 번 나오기도 한다. 표에서 읽은 쪽만 남긴다.
+    real = {h["name"] for h in out if not h.get("from_info")}
+    return [h for h in out if not (h.get("from_info") and h["name"] in real)]
 
 
 def rent_rows(text: str) -> list[tuple[str, float, float, float]]:
@@ -341,7 +370,7 @@ def _notice_files(url: str, deadline: date) -> tuple[date | None, tuple[dict, ..
     reader = None
     if pdf:
         reader = PdfReader(io.BytesIO(requests.get(LH_FILE.format(pdf.group(1)), timeout=60).content))
-        announce = announce_date("\n".join(p.extract_text() or "" for p in reader.pages[:4]), deadline)
+        announce = announce_date("\n".join(p.extract_text() or "" for p in reader.pages[:8]), deadline)  # 현장접수 공고는 일정표가 7쪽에 있다
     match = HOUSE_LIST.search(page)
     if not match:
         # 단지형 공고: 위치·면적은 페이지 단지 정보, 임대료는 페이지에 없으면 공고문 임대조건 표에서
@@ -371,6 +400,12 @@ def _rank_key(b: dict) -> tuple[int, int]:
     transit, car = b.get("commute") or {}, b.get("commute_car") or {}
     usable = transit and all(m < NO_ROUTE for m in transit.values())
     return (sum(transit.values()) if usable else NO_ROUTE * 2, sum(car.values()) or NO_ROUTE * 2)
+
+
+def _sido_of(house: dict, where: str) -> str:
+    """위치 검색의 시·도. '대구광역시 외' 공고의 경북 집은 공고 지역이 아니라 집 주소의 시·도로 찾는다."""
+    found = lease_rules.sido(house.get("address") or "") or where
+    return "" if found == "전국" else found  # 카카오 주소는 '전국' 으로 시작하지 않는다
 
 
 def add_commute(leases: list[dict], profile: dict, kakao_key: str, odsay_key: str, cache) -> None:
@@ -403,7 +438,8 @@ def add_commute(leases: list[dict], profile: dict, kakao_key: str, odsay_key: st
         for b in houses:
             # LH 주소는 '도로명 21-4(고색동) 건물명' 꼴이라 괄호 앞이 가장 정확하다
             candidates = geo.address_candidates(b["address"].split("(")[0])
-            coords = next((c for c in (geo.geocode(a, kakao_key, cache) for a in candidates) if c), None)
+            where = _sido_of(b, lease_rules.sido(str(lease.get("region") or "")))
+            coords = next((c for c in (geo.geocode(a, kakao_key, cache, where) for a in candidates) if c), None)
             if coords and destinations:
                 b["commute_car"] = {n: commute.car_minutes(coords, d, kakao_key, cache) for n, d in destinations.items()}
                 b["coords"] = coords
@@ -802,4 +838,31 @@ if __name__ == "__main__":
     assert not low_income(couple)
     assert low_income({**couple, "applicant": {"monthly_income": 4_000_000}, "spouse": {"monthly_income": 0}})
     assert not low_income({"applicant": {}})  # 소득 모르면 기본(초과) 조건
+
+    # 발표일 형식: 일정표(일 뒤에 점 없음) · '당첨자 발표 12.11(금)'(연도 없음)
+    assert announce_date("’26.12.10(목) 당첨자 발표 및 예비입주자 순번 별도 안내", date(2026, 11, 20)) == date(2026, 12, 10)
+    assert announce_date("당첨자 발표 12.11(금)", date(2026, 11, 20)) == date(2026, 12, 11)
+    assert announce_date("당첨자 발표 1.8(목)", date(2026, 12, 20)) == date(2027, 1, 8)
+    # 발표일이 적힌 공고의 일정표 전자계약일(…’27.03.02(화) 10:00 … 별도 안내 예정)을 발표일로 읽지 않는다
+    assert announce_date("서류제출대상자 발표일 2026.11.11.(수) 16시 이후\n’27.03.02(화) 10:00\n[현장계약] 별도 안내 예정",
+                         date(2026, 10, 30)) == date(2026, 11, 11)
+    # 주택목록: 안내문 한 줄은 머리글이 아니고, 열 이름 변형을 받는다
+    notice = {"A": "※ 아래 주택목록 참고", "B": ""}
+    head = {"A": "연번", "B": "도로명주소", "C": "면적(㎡)전용", "D": "기본보증금", "E": "(기본)임대료"}
+    one = {"A": "1", "B": "대구 중구 1", "C": "26.4", "D": "5000000", "E": "100000"}
+    cols = _columns(_labels([notice, head, one]))
+    assert (cols["address"], cols["area"], cols["deposit"], cols["rent"]) == ("B", "C", "D", "E"), cols
+    assert _columns({"A": "무보증금", "B": "임대보증금", "C": "월임대료"})["deposit"] == "B"
+    # 단지형: 수급자 전용만 빼고, 표가 빈 단지는 단지 정보 면적을 쓰고, 같은 단지의 빈 블록은 버린다
+    assert _recipients_only("수급자") and _recipients_only("주거급여수급자(수급자)")
+    assert not _recipients_only("25A(대학생,청년,주거급여수급자,고령자)") and not _recipients_only("26A")
+    thead = "<thead><tr><th>주택형</th><th>전용면적</th><th>금회공급</th><th>임대보증금</th><th>월임대료</th></tr></thead>"
+    full = ('<h4>음성금왕1</h4> 소재지 : 충북 음성군 ' + thead + '<tbody>'
+            '<tr><td>26A(대학생,청년,주거급여수급자)</td><td>26.37</td><td>10</td><td>5,000,000</td><td>100,000</td></tr>'
+            '<tr><td>수급자</td><td>20</td><td>1</td><td>1</td><td>1</td></tr></tbody>')
+    empty = ('<h4>{}</h4> 소재지 : 충북 음성군 <li>전용면적(㎡) : 26.37~31.32</li>' + thead +
+             '<tbody><tr><td>주택형 데이터가 없습니다</td></tr></tbody>')
+    page = f'id="wrtancSbdTab1">{full} id="wrtancSbdTab2">{empty.format("음성금왕1")} id="wrtancSbdTab3">{empty.format("익산한스빌")}'
+    got = complexes(page)
+    assert [(h["name"], h["units"], h["areas"], h.get("from_info")) for h in got] ==         [("음성금왕1", 10, [26.37], None), ("익산한스빌", 0, [26.37, 31.32], True)], got
     print("ok")

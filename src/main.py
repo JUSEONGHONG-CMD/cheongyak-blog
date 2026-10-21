@@ -558,6 +558,8 @@ def main() -> int:
 
 if __name__ == "__main__":
     if os.environ.get("SELFTEST"):
+        geo.selfcheck()
+        notice_pdf.selfcheck()
         assert split_detail([1] * 5, [2] * 5) == ([1] * 3, [2] * 3)
         assert split_detail([1] * 5, [2]) == ([1] * 5, [2])
         assert split_detail([1], [2] * 9) == ([1], [2] * 5)
