@@ -423,18 +423,73 @@ def last_posted(alias: str) -> str:
     return max((r.get("last_sent") or r.get("first_sent") or "" for r in SeenStore(alias).data.values()), default="")
 
 
-def run_one(alias, profile, args, keys, cache, today) -> str | None:
-    """한 인물. 'sent'(미리보기는 만들었음) · 'skip'(새 공고 없음) · None(실패)."""
-    blog = profile["blog"]
-    seen = SeenStore(alias)
+def gather(profile, keys, cache, today) -> dict:
+    """한 인물이 넣을 수 있는 공고 전부(분양·임대). 배정 전 단계."""
     sale, verdicts, degraded = collect_sale(profile, keys, cache, today)
     leases = collect_lease(profile, keys, cache, today)
     # 글은 그날 08:30 이후 올라간다. 오늘 마감 공고는 읽는 사람이 넣을 시간이 없어 뺀다
-    sale = [x for x in sale if x.get("days_left") != 0]
-    leases = [x for x in leases if x["deadline"] > today]
-    sale_new = sorted((x for x in sale if seen.is_new(x)), key=lambda x: x.get("category") in ANYONE)
-    lease_new = [x for x in leases if seen.is_new(x)]
-    print(f"      분양 {len(sale)}건(새 {len(sale_new)}) · 임대 {len(leases)}건(새 {len(lease_new)})")
+    return {"sale": [x for x in sale if x.get("days_left") != 0], "verdicts": verdicts, "degraded": degraded,
+            "leases": [x for x in leases if x["deadline"] > today]}
+
+
+# 대상층이 정해진 LH 임대 유형. 든든전세·국민·영구·공공임대처럼 누구나 넣는 유형보다 그 인물에게 더 맞다
+TARGETED = ("청년", "신혼", "신생아", "고령", "다자녀", "대학생", "한부모")
+SPECIAL = ("특공", "특별공급")
+
+
+def fit(item: dict, pool: dict, profile: dict) -> tuple[int, int, int]:
+    """이 공고가 이 인물에게 얼마나 맞나: (전형 맞춤 3·2·1, 확실함 1·0, 사는 시·도 1·0). 클수록 잘 맞는다.
+
+    분양: 특별공급 3 > 일반공급 2 > 누구나 넣는 공고(임의공급·무순위·오피스텔 등) 1.
+    임대: 대상층이 정해진 유형(청년·신혼·고령자 …) 3 > 누구나 넣는 유형 1.
+    """
+    home = str((profile.get("applicant") or {}).get("region") or "")
+    if "deadline" in item:  # LH 임대
+        text = f"{item.get('kind', '')} {item.get('track', '')}"
+        level = 3 if any(w in text for w in TARGETED) else 1
+        return level, int(item.get("sure", True)), int(bool(home) and home in str(item.get("region") or ""))
+    verdict = pool["verdicts"].get(applyhome_key(item))
+    possible = verdict.possible if verdict else []
+    routes = (verdict.possible + verdict.conditional) if verdict else []
+    special = [r for r in routes if any(w in r.name for w in SPECIAL)]
+    level = 1 if item.get("category") in ANYONE else 3 if special else 2
+    sure = any(r in possible for r in special) if special else bool(possible)
+    return level, int(sure), int(home == str(item.get("area_name") or ""))
+
+
+def assign(pools: dict[str, dict], profiles: dict[str, dict], posted: dict) -> dict[str, str]:
+    """아직 어느 인물로도 안 나간 공고마다 가장 알맞은 인물 하나를 정한다. {공고 키: 별칭}
+
+    같은 공고가 여러 인물 원고에 겹쳐 나가지 않게 한다(2026-10-26 요청). 맞춤 점수(fit)가 높은 인물,
+    같으면 후보 공고가 적은 인물(쓸 소재가 부족한 쪽), 그다음 글이 오래 안 나간 인물에게 준다.
+    """
+    candidates: dict[str, list[tuple]] = {}
+    sizes = {a: len(p["sale"]) + len(p["leases"]) for a, p in pools.items()}
+    for alias, pool in pools.items():
+        for item in (*pool["sale"], *pool["leases"]):
+            key = SeenStore.key(item)
+            if key not in posted:
+                rank = fit(item, pool, profiles[alias])
+                candidates.setdefault(key, []).append(
+                    (tuple(-r for r in rank), sizes[alias], last_posted(alias), alias))
+    return {key: min(options)[-1] for key, options in candidates.items()}
+
+
+def run_one(alias, profile, args, pool, owner, posted, today) -> str | None:
+    """한 인물. 'sent'(미리보기는 만들었음) · 'skip'(새 공고 없음) · None(실패).
+
+    pool 은 gather 결과, owner 는 assign 결과(공고 키 → 그 공고를 쓸 인물), posted 는 이미 나간 공고 키 → {인물: 처음 쓴 날}.
+    """
+    blog = profile["blog"]
+    seen = SeenStore(alias)
+    sale, leases = pool["sale"], pool["leases"]
+    verdicts, degraded = pool["verdicts"], pool["degraded"]
+    mine = lambda x: owner.get(SeenStore.key(x)) == alias  # noqa: E731
+    sale_new = sorted((x for x in sale if mine(x)), key=lambda x: x.get("category") in ANYONE)
+    lease_new = [x for x in leases if mine(x)]
+    others = len([x for x in (*sale, *leases) if SeenStore.key(x) in owner and not mine(x)])
+    print(f"      분양 {len(sale)}건(새 {len(sale_new)}) · 임대 {len(leases)}건(새 {len(lease_new)})"
+          + (f" · 다른 인물에게 간 공고 {others}건" if others else ""))
     if not sale_new and not lease_new:
         print("      새 공고 없음 — 건너뜀")
         return "skip"
@@ -443,7 +498,13 @@ def run_one(alias, profile, args, keys, cache, today) -> str | None:
     for number, x in enumerate(sale_show, 1):  # 순서를 바꿨으니 표의 # 도 다시 매긴다
         x["rank"] = number
     shown = {id(x) for x in (*sale_show, *lease_show)}
-    rest = [x for x in (*sale, *leases) if id(x) not in shown]
+    def ours(x):  # 이 인물 몫이거나, 이 인물이 가장 먼저 쓴 공고만 (배정 전에 여러 인물이 함께 쓴 공고 포함)
+        key = SeenStore.key(x)
+        if key in owner:
+            return owner[key] == alias
+        first = min(posted.get(key, {alias: ""}).items(), key=lambda kv: (kv[1], kv[0]))[0]
+        return first == alias
+    rest = [x for x in (*sale, *leases) if id(x) not in shown and ours(x)]
     issues = [*drop_suspect_numbers(sale_show),
               *validate.check_data(sale_show, verdicts, applyhome_key, today, profile.get("filters") or {}),
               *validate.check_leases(lease_show, today)]
@@ -492,10 +553,11 @@ def run_one(alias, profile, args, keys, cache, today) -> str | None:
 
 def run(args: argparse.Namespace) -> int:
     today = date.today()
-    profiles = load_profiles()
+    everyone = load_profiles()
+    profiles = everyone
     if args.only:
         wanted = {a.strip() for a in args.only.split(",") if a.strip()}
-        profiles = {k: v for k, v in profiles.items() if k in wanted}
+        profiles = {k: v for k, v in everyone.items() if k in wanted}
     # 오래 안 나간 인물부터. 못 나간 인물의 새 공고는 기록이 안 남아 다음 발행일로 넘어간다
     order = sorted(profiles, key=lambda a: (last_posted(a), a))
     print(f"하루 최대 {args.max}편 · 순서: {', '.join(order)}")
@@ -505,15 +567,35 @@ def run(args: argparse.Namespace) -> int:
     }
     cache = geo.GeoCache()
     failed = []
+    # 배정은 언제나 전원 기준으로 한다(--only 로 일부만 보낼 때도 다른 인물 몫을 가져오지 않게)
+    pools = {}
+    for alias, profile in everyone.items():
+        try:
+            pools[alias] = gather(profile, keys, cache, today)
+        except Exception:  # 한 인물의 오류가 다른 인물 원고를 막지 않게 한다
+            traceback.print_exc()
+            failed.append(alias)
+        finally:
+            cache.save()
+    posted: dict[str, dict[str, str]] = {}  # 공고 키 → {쓴 인물: 처음 쓴 날}
+    for alias in everyone:
+        for key, record in SeenStore(alias).data.items():
+            posted.setdefault(key, {})[alias] = record.get("first_sent") or ""
+    owner = assign(pools, everyone, posted)
+    shared = sum(1 for k in owner if sum(any(SeenStore.key(x) == k for x in (*p["sale"], *p["leases"]))
+                                          for p in pools.values()) > 1)
+    print(f"새 공고 {len(owner)}건 배정 · 여러 인물에 해당하던 공고 {shared}건은 한 명에게만")
     sent = 0
     for alias in order:
+        if alias not in pools:
+            continue
         if sent >= args.max:
             break
         profile = profiles[alias]
         profile["blog"]["publish_time"] = SLOTS[sent % len(SLOTS)]
         print(f"\n===== {alias} · {profile['blog']['category']} =====")
         try:
-            ok = run_one(alias, profile, args, keys, cache, today)
+            ok = run_one(alias, profile, args, pools[alias], owner, posted, today)
         except Exception:  # 한 인물의 오류가 다른 인물 원고를 막지 않게 한다
             traceback.print_exc()
             ok = False
@@ -546,6 +628,24 @@ if __name__ == "__main__":
     if os.environ.get("SELFTEST"):
         geo.selfcheck()
         notice_pdf.selfcheck()
+        # 배정: 같은 공고는 특공 대상 인물에게, 이미 나간 공고는 아무에게도
+        from .eligibility import Route, Verdict
+        apt = {"category": "APT", "house_manage_no": "1", "pblanc_no": "1", "area_name": "경기"}
+        loose = {"category": "임의공급", "house_manage_no": "2", "pblanc_no": "2", "area_name": "경기"}
+        old = {"category": "APT", "house_manage_no": "3", "pblanc_no": "3", "area_name": "경기"}
+        couple = {"verdicts": {applyhome_key(apt): Verdict(routes=[Route("신혼부부 특별공급 (우선)", "가능", "")]),
+                               applyhome_key(old): Verdict(routes=[Route("일반공급 추첨제", "가능", "")])},
+                  "sale": [apt, old], "leases": []}
+        single = {"verdicts": {applyhome_key(apt): Verdict(routes=[Route("일반공급 추첨제", "가능", "")]),
+                               applyhome_key(loose): Verdict(routes=[Route("임의공급", "가능", "")])},
+                  "sale": [apt, loose], "leases": []}
+        people = {"zz-couple": {"applicant": {"region": "인천"}}, "zz-single": {"applicant": {"region": "경기"}}}
+        got = assign({"zz-couple": couple, "zz-single": single}, people, {applyhome_key(old): {"zz-other": "2026-10-01"}})
+        assert got == {applyhome_key(apt): "zz-couple", applyhome_key(loose): "zz-single"}, got
+        youth = {"kind": "청년(본인)", "deadline": date(2026, 11, 1), "region": "서울특별시", "seen_key": "lease:a"}
+        dd = {"kind": "든든전세", "deadline": date(2026, 11, 1), "region": "서울특별시", "seen_key": "lease:b"}
+        assert fit(youth, {}, {"applicant": {"region": "서울"}}) == (3, 1, 1)
+        assert fit(dd, {}, {"applicant": {"region": "경기"}}) == (1, 1, 0)
         assert split_detail([1] * 5, [2] * 5) == ([1] * 3, [2] * 3)
         assert split_detail([1] * 5, [2]) == ([1] * 5, [2])
         assert split_detail([1], [2] * 9) == ([1], [2] * 5)
