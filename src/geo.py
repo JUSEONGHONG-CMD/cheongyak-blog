@@ -321,6 +321,9 @@ def enrich(items: list[dict], rest_key: str, cache: GeoCache) -> None:
 
 
 def selfcheck() -> None:
+    # 베타 2026-10 점검 요청서 사례 그대로 (5): 대괄호 블록명을 뺀 후보가 있어야 '대략' 위치가 안 된다
+    assert "경기도 화성특례시 동탄구 반송동 95" in address_candidates(
+        "경기도 화성특례시 동탄구 반송동 95번지[동탄(1) M1-1-2블록]")
     assert city_of("경기도 화성특례시 동탄지구 [동탄(1) M1-1-2블록]") == "화성"
     assert city_of("인천 서구 검단동 1") == "" and city_of("세종특별자치시 산울동") == ""
     assert city_of("경기도 김포시 사우동 527-1 일원") == "김포"

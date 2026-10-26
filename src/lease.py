@@ -188,9 +188,10 @@ def _columns(labels: dict[str, str]) -> dict[str, str]:
     def find(test) -> str:
         return next((k for k, v in labels.items() if test(v)), "")
 
-    deposits = [k for k, v in labels.items()
-                if ("임대보증금" in v or (v.endswith("보증금") and "무보증" not in v))
-                and not re.search("상한|하한|최대전환", v)]
+    deposits = [k for k, v in labels.items() if "임대보증금" in v and not re.search("상한|하한|최대전환", v)]
+    # 대구경북 양식은 '임대조건(원) 보증금'. 임대보증금 열이 없을 때만 '…보증금' 열을 쓴다(베타 2026-10 점검)
+    deposits = deposits or [k for k, v in labels.items()
+                            if v.endswith("보증금") and "무보증" not in v and not re.search("상한|하한|최대전환", v)]
 
     def score(k: str) -> int:
         return bool(re.search(r"초과|2[·,]?3?순위", labels[k]))
@@ -865,4 +866,21 @@ if __name__ == "__main__":
     page = f'id="wrtancSbdTab1">{full} id="wrtancSbdTab2">{empty.format("음성금왕1")} id="wrtancSbdTab3">{empty.format("익산한스빌")}'
     got = complexes(page)
     assert [(h["name"], h["units"], h["areas"], h.get("from_info")) for h in got] ==         [("음성금왕1", 10, [26.37], None), ("익산한스빌", 0, [26.37, 31.32], True)], got
+
+    # 베타 2026-10 점검 요청서 사례 그대로 (1~4)
+    dgb = [{"A": "* 주택 관련 사항은 지역별 담당 관리부서로 문의하시기 바랍니다.", "B": ""},
+           {"A": "순번", "D": "도로명주소", "K": "면적(㎡)", "L": "", "N": "임대조건(원)", "O": "", "P": ""},
+           {"A": "", "K": "전용", "L": "공용", "N": "보증금", "O": "임대료", "P": "무보증월세여부"},
+           {"A": "1", "D": "경상북도 경산시 경안로 261-1(중방동) 조이지움 B", "K": "67.08", "L": "12.87",
+            "N": "8831000", "O": "235340", "P": "N"}]
+    assert [(x["areas"], x["deposits"], x["rents"]) for x in buildings(dgb)] == [([67.08], [8831000.0], [235340.0])]
+    dg = ("‘26.11.16(월)\n[LH청약플러스]\n(17:00)\n‘26.11월 중 \n별도안내\n‘26.12.10(목)\n[LH청약플러스]\n(17:00)"
+          "\n‘26.12월 중\n별도안내")
+    assert announce_date(dg, date(2026, 10, 21)) == date(2026, 12, 10)
+    assert announce_date("서류제출\n대상자 발표\n10.29(목)\n당첨자 \n발표\n12.11(금)\n(16:00 이후)",
+                         date(2026, 10, 28)) == date(2026, 12, 11)
+    assert _recipients_only("26(수급자)") and _recipients_only("주거급여수급자 26A")
+    assert not _recipients_only("25A(대학생,청년,신혼부부,한부모,주거급여수급자,고령자)") and not _recipients_only("36A")
+    assert _sido_of({"address": "경상북도 경산시 경안로 261-1"}, "대구") == "경북"
+    assert _sido_of({"address": "수원시 호매실로 21-4"}, "경기") == "경기"
     print("ok")
