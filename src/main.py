@@ -241,6 +241,12 @@ SMALL = "font-size:13px;color:#888;line-height:1.7"
 HR = "<hr style='border:none;border-top:1px solid #ccc;margin:28px 0'>"
 QUOTE = f"border-left:4px solid #3168f5;background:#f5f8ff;margin:16px 0;padding:12px 18px;{BODY}"
 CELL = "border:1px solid #ddd;padding:6px 12px;text-align:center"
+HIGHLIGHT = "#fff176"  # 형광펜. 한 화면에 2~3곳, 결론·마감·금액에만 칠한다(남발하면 눈에 안 들어온다)
+
+
+def _hl(inner_html: str) -> str:
+    """형광펜 + 굵게. 네이버 에디터의 '글자 배경색'으로 붙는다(인용구 배경색처럼 붙여넣기에서 살아남)."""
+    return f"<span style='background-color:{HIGHLIGHT}'><b>{inner_html}</b></span>"
 
 
 def _table(head: tuple[str, ...], rows: list[tuple[str, ...]]) -> str:
@@ -277,7 +283,7 @@ def _route_sentence(route, label: str) -> str:
     who = re.search(r"([가-힣]+) 명의\)", route.name)
     owner = f"{who.group(1)} 명의로 " if who else ""
     if route.status == "가능":
-        text = f"<b>{escape(name)}</b>{validate.josa(name, '으로')} {owner}넣을 수 있어요."
+        text = f"{_hl(escape(name))}{validate.josa(name, '으로')} {owner}넣을 수 있어요."
     else:
         text = f"<b>{escape(name)}</b>도 {owner}가능성이 있지만, 공고문으로 확인이 필요해요."
     return text + (f" <span style='color:#666'>({escape(route.reason)})</span>" if route.reason else "")
@@ -299,11 +305,11 @@ def readable_html(profile: dict, sale_show, lease_show, verdicts, count: int, in
     if is_lease:
         houses = top.get("top") or []
         deposits = [d for b in houses for d in (b.get("deposits") or [])]
-        lines = [f"① {escape(name)}{eun} <b>{_md(top['deadline'])}</b>까지 접수해요 ({dday(top)}).",
-                 f"② {escape(label)} 조건이면 <b>{escape(top['kind'].split('(')[0])}</b> 유형으로 신청할 수 있어요.",
+        lines = [f"① {escape(name)}{eun} {_hl(_md(top['deadline']))}까지 접수해요 ({dday(top)}).",
+                 f"② {escape(label)} 조건이면 {_hl(escape(top['kind'].split('(')[0]))} 유형으로 신청할 수 있어요.",
                  f"③ {escape(str(top.get('region') or ''))} 일대 "
                  + (f"{top['houses']}호를 모집하고, " if top.get("houses") else "")
-                 + (f"보증금은 <b>{lease._won([min(deposits)])}</b>부터예요." if deposits else "보증금은 공고문에서 확인해요.")]
+                 + (f"보증금은 {_hl(lease._won([min(deposits)]))}부터예요." if deposits else "보증금은 공고문에서 확인해요.")]
     else:
         verdict = verdicts.get(applyhome_key(top))
         route = best_route(verdict).replace("❔", "")
@@ -311,14 +317,17 @@ def readable_html(profile: dict, sale_show, lease_show, verdicts, count: int, in
         ends = [d for d in (top.get("special_end"), top.get("general_end")) if d]
         m = top.get("market") or {}
         price = detail.price_span(top)
-        third = ", ".join(x for x in (detail.areas_text(top), f"분양가 <b>{price}</b>" if price else "") if x)
+        third = ", ".join(x for x in (detail.areas_text(top), f"분양가 {_hl(price)}" if price else "") if x)
         if m.get("gap_pct") is not None and price:
             third += f"으로 주변 시세보다 약 {abs(m['gap_pct']):.0f}% {'저렴해요' if m['gap_pct'] < 0 else '비싸요'}."
         else:
             third += "예요." if third else "분양가는 공고문에서 확인해요."
-        lines = [f"① {escape(name)}{eun} <b>{_span(min(begins, default=None), max(ends, default=None))}</b> "
+        sure = bool(verdict and verdict.possible)
+        lines = [f"① {escape(name)}{eun} {_hl(_span(min(begins, default=None), max(ends, default=None)))} "
                  f"접수해요 ({dday(top)}).",
-                 f"② {escape(label)} 조건이면 <b>{escape(route or '청약')}</b>{validate.josa(route or '청약', '으로')} "
+                 f"② {escape(label)} 조건이면 "
+                 f"{_hl(escape(route or '청약')) if sure else '<b>' + escape(route or '청약') + '</b>'}"
+                 f"{validate.josa(route or '청약', '으로')} "
                  + ("넣을 수 있어요." if verdict and verdict.possible else "넣을 수 있는지 공고문 확인이 필요해요."),
                  f"③ {third}"]
     out.append(f"<blockquote style='{QUOTE}'><b>📌 핵심 3줄 요약</b><br>{'<br>'.join(lines)}</blockquote>")
@@ -330,7 +339,7 @@ def readable_html(profile: dict, sale_show, lease_show, verdicts, count: int, in
     if is_lease:
         rows = [("접수 마감", _md(top["deadline"])), ("당첨자 발표", _md(top.get("announce"))),
                 ("입주", "계약 후 90일 안")]
-        out.append(f"<p style='{BODY}'>접수는 <b>{_md(top['deadline'])}</b>에 끝나요. LH 임대는 발표 뒤 계약을 거쳐 "
+        out.append(f"<p style='{BODY}'>접수는 {_hl(_md(top['deadline']))}에 끝나요. LH 임대는 발표 뒤 계약을 거쳐 "
                    "입주하니, 보증금 마련 시점을 미리 계산해 두세요.</p>")
     else:
         rows = []
@@ -339,7 +348,7 @@ def readable_html(profile: dict, sale_show, lease_show, verdicts, count: int, in
         if top.get("general_end"):
             rows.append(("일반공급 접수", _span(top.get("general_begin"), top.get("general_end"))))
         rows += [("당첨자 발표", _md(top.get("announce_date"))), ("입주 예정", detail.fmt_move_in(top.get("move_in")))]
-        out.append(f"<p style='{BODY}'>마감은 <b>{_md(max(ends, default=None))}</b>이고, 당첨자 발표는 "
+        out.append(f"<p style='{BODY}'>마감은 {_hl(_md(max(ends, default=None)))}이고, 당첨자 발표는 "
                    f"<b>{_md(top.get('announce_date'))}</b>이에요. 발표 뒤 계약까지 시간이 짧으니 계약금을 미리 "
                    "준비해 두세요.</p>")
     out.append(_table(("구분", "일정"), rows))
@@ -408,11 +417,12 @@ def readable_html(profile: dict, sale_show, lease_show, verdicts, count: int, in
         if top.get("price_min"):
             low = top["price_min"] * 0.1 / 1e8
             faq.append(("계약금은 얼마나 준비해야 하나요?", f"공고마다 다르지만 보통 분양가의 10~20%예요. "
-                        f"이 단지는 최소 약 {_money(low * 1e8)} 이상을 계약 때 내야 할 수 있어요."))
+                        f"이 단지는 최소 약 [[{_money(low * 1e8)}]] 이상을 계약 때 내야 할 수 있어요."))
     faq.append(("마감 뒤에도 넣을 수 있나요?", "아니요. 마감 뒤에는 신청할 수 없어요. 미계약분이 생기면 무순위로 다시 "
                 "나올 수 있으니 이 블로그에서 다시 알려 드릴게요."))
     out.append(HR + f"<p style='{HEAD}'>❓ 자주 묻는 질문</p>")
-    out += [f"<p style='{BODY}'><b>Q. {escape(q)}</b><br>A. {escape(a)}</p>" for q, a in faq[:3]]
+    out += [f"<p style='{BODY}'><b>Q. {escape(q)}</b><br>A. "
+            + re.sub(r"\[\[(.+?)\]\]", lambda m: _hl(m.group(1)), escape(a)) + "</p>" for q, a in faq[:3]]
 
     out.append(HR + f"<p style='{BODY}'>{escape(label)} 조건이라면 <b>{escape(name)}</b>부터 확인해 보세요. "
                "아래 <b>📂 자세히 보기</b>에 공고별 상세 정보와 시세 그래프를 정리했어요. "
