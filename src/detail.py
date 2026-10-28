@@ -77,7 +77,9 @@ def summary_sentence(item: dict) -> str:
     text = f"{name}{josa(name, '은')} {where}의 {kind}"
     if facts:
         text += f"{josa(kind, '으로')}, " + ", ".join(facts)
-    return text + (f"이며 {end.month}월 {end.day}일에 접수가 끝납니다." if end else "입니다.")
+    if end:
+        return text + f"이며 {end.month}월 {end.day}일에 접수가 끝나요."
+    return text + ("이에요." if josa(text, "이") == "이" else "예요.")
 
 
 def fmt_date(value) -> str:

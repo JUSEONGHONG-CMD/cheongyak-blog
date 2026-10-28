@@ -196,7 +196,8 @@ def check_text(html: str) -> list[str]:
         want = josa(m.group(1), m.group(3))
         if want != m.group(3):
             problems.append(f"조사 '{m.group(1)}{m.group(3)}' → '{m.group(1)}{want}'")
-    text = re.sub(r"<[^>]+>", " ", html)
+    text = re.sub(r"</?(?:b|strong|span|a|i|em|u)(?:\s[^>]*)?>", "", html)  # 글자 안 태그는 붙여서
+    text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"&nbsp;|&amp;", " ", text)
     # 2) 같은 단어가 붙어 반복 ('오피스텔 오피스텔')
     for m in re.finditer(r"(?<![가-힣\w])([가-힣]{2,}) \1(?![가-힣\w])", text):
@@ -258,4 +259,5 @@ if __name__ == "__main__":
     assert any("반복" in p for p in bad) and any("문장부호" in p for p in bad) and any("됬" in p for p in bad)
     ok = check_text("가장 먼저 볼 곳은 <b>산곡역자이</b>(인천 · D-9 마감)로, 신혼부부 특공 자격으로 넣을 수 있습니다. 사이가 좋다.")
     assert ok == [], ok
+    assert check_text("확인하세요: <b>무주택</b> · <b>소득 기준 충족</b>.") == []
     print("ok")

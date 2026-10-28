@@ -690,7 +690,7 @@ def html_section(leases: list[dict], today: date) -> str:
         f" ({_dday(x['deadline'], today)}) · {escape(move_in(x))}</p>"
         + f"<p style='margin:2px 0;font-size:14px'>{escape(x['region'])} {escape(x['kind'])} "
           f"{('%d호를 ' % x['houses']) if x.get('houses') else ''}모집하며 "
-          f"{x['deadline'].month}월 {x['deadline'].day}일에 접수가 끝납니다.</p>"
+          f"{x['deadline'].month}월 {x['deadline'].day}일에 접수가 끝나요.</p>"
         + (f"<p style='margin:0;{small}'>{escape(x['track'])}</p>" if x.get("track") else "")
         + f"<div style='margin-top:4px;font-size:13px'>{houses(x)}</div>"
         for x in leases
