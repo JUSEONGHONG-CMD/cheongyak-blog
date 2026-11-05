@@ -78,17 +78,12 @@ def _chart_png(points: list[dict], values: list[int], price: int, floor: float, 
     return buf.getvalue()
 
 
-def market_chart(item: dict, images: dict[str, bytes]) -> str:
-    """주변 시세 추이 선그래프.
-
-    Gmail 은 본문의 SVG 와 data: 이미지를 지우지만, 메일에 첨부하고 cid: 로
-    가리킨 이미지는 보여 준다. 그래서 PNG 로 그려 images 에 담고 본문에는
-    그 cid 만 적는다. 첨부는 send() 가 한다.
-    """
+def market_chart(item: dict) -> dict:
+    """주변 시세 추이 선그래프. 공고 카드 사진에 합칠 {'chart': PNG, 'notes': 설명 줄}. 자료가 모자라면 {}."""
     m = item.get("market") or {}
     series = m.get("series") or []
     if len(series) < 3:
-        return ""
+        return {}
 
     points = list(reversed(series))  # 오래된 달이 왼쪽에 오도록
     values = [p["median"] for p in points]
@@ -108,35 +103,16 @@ def market_chart(item: dict, images: dict[str, bytes]) -> str:
         if span / (wide_top - wide_floor) >= MIN_TREND_SHARE:
             top, floor = wide_top, wide_floor
 
-    cid = f"chart{len(images) + 1}@cheongyak"
-    images[cid] = _chart_png(points, values, price, floor, top)
-
     caption = (
         f"주변 전용 {m['area']:.0f}㎡ · {m.get('cohort', '준공연도 무관')} 실거래 중위값"
         f" · 최근 {len(points)}개월"
     )
-    if price:
-        color = CHEAP if price < values[-1] else PRICEY
-        if floor <= price <= top:
-            note = "점선은 이 단지 분양가"
-        else:
-            side = "아래" if price < floor else "위"
-            note = f"분양가 {price / 1e8:.1f}억은 그래프 {side}쪽 밖"
-        caption_html = (
-            f"{escape(caption)} · <span style='color:{color}'>{escape(note)}</span>"
-        )
-    else:
-        caption_html = escape(caption)
-
-    return (
-        "<div style='margin-top:10px'>"
-        f"<div style='font-size:12px;color:#555;margin-bottom:6px'>📈 {caption_html}</div>"
-        f"<img src='cid:{cid}' width='480' alt='주변 시세 추이 그래프' "
-        "style='display:block;width:100%;max-width:480px;height:auto;border:0'>"
-        "<div style='font-size:10px;color:#aaa;margin-top:4px'>"
-        "세로축 단위 억 원 · 차이가 보이도록 0부터 그리지 않았습니다</div>"
-        "</div>"
-    )
+    note = "세로축 단위 억 원 · 0부터 그리지 않음"
+    if price and floor <= price <= top:
+        note = f"점선은 이 단지 분양가 · {note}"
+    elif price:
+        note = f"분양가 {price / 1e8:.1f}억은 그래프 {'아래' if price < floor else '위'}쪽 밖 · {note}"
+    return {"chart": _chart_png(points, values, price, floor, top), "notes": [caption, note]}
 
 
 def short_route(name: str) -> str:
@@ -176,7 +152,6 @@ def link_bar(item: dict, today) -> str:
 
 
 CARD_MAX = 3  # 자세히 보기에서 카드로 만드는 공고 수. 나머지는 한 줄 요약
-CHART_MAX = 2  # 시세 그래프를 붙이는 공고 수. 사진이 10장을 넘지 않게 묶는다
 
 
 def _short(item: dict, limit: int = 14) -> str:
@@ -284,9 +259,9 @@ def build_html(
             f"{escape(detail.title(item))}</a></h3>"
             f"<p style='margin:4px 0 8px;font-size:15px;line-height:1.7'>{escape(detail.summary_sentence(item))}</p>"
             + (_card_img(images, f"card{10 + order}@blog", thumbnail.info_card(
-                _short(item, 16), detail_rows(item, verdict), split=0.2), f"{_short(item)} 정보") if order < CARD_MAX else "")
+                _short(item, 16), detail_rows(item, verdict), split=0.2, **market_chart(item)),
+                f"{_short(item)} 정보와 주변 시세 그래프") if order < CARD_MAX else "")
             + link_bar(item, today)
-            + (market_chart(item, images) if order < CHART_MAX else "")
             + "</div>"
         )
 

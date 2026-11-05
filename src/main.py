@@ -739,13 +739,8 @@ def place_images(post: str, images: dict[str, bytes], folder: Path, base_url: st
             name, slug = "썸네일", "thumb"
         elif cid.startswith("plan"):
             name, slug = "평면도", "plan"
-        elif cid.startswith("card"):
+        else:
             name, slug = "정보카드", "card"
-        else:  # 그래프 바로 앞의 공고 카드 제목(h3)이 그 그래프의 단지
-            head = re.findall(r"<h3[^>]*>(.*?)</h3>", post[: post.find(f"cid:{cid}")], re.S)
-            # 카드 제목 '🔴 마감임박 1. 쌍용 더 플래티넘 한강' 에서 순번 앞부분을 떼고 단지명만
-            title = re.sub(r"^.*?\d+\.\s*", "", re.sub(r"<[^>]+>", "", head[-1]).strip()) if head else ""
-            name, slug = "시세그래프_" + compact(title)[:20], "chart"
         public_name = f"{number:02d}_{slug}.png"  # 주소에는 한글을 쓰지 않는다
         (folder / public_name).write_bytes(images[cid])
         files.append((f"{number:02d}_{name}.png", images[cid], "image/png"))
@@ -768,7 +763,7 @@ def build_mail(blog: dict, title: str, tags: list[str], issues: list, post: str)
         + row.format("태그 (입력란에 붙여넣기)", f"<b>{escape(', '.join(tags))}</b>")
         + row.format("예약 발행", escape(blog.get("publish_time") or "-"))
         + row.format("사진", "본문을 그대로 복사하면 썸네일·그래프가 사진으로 함께 들어갑니다(공개 주소 이미지). "
-                     "빠진 사진만 첨부 <b>01_썸네일 · 02_시세그래프…</b>로 넣으세요.")
+                     "빠진 사진만 첨부 <b>01_썸네일 · 02_…</b>로 넣으세요.")
         + (row.format("검증 메모", notes) if not issues else
            "<tr><td style='padding:4px 10px;color:#c33'><b>검증 메모</b></td>"
            f"<td style='padding:4px 10px;background:#fde8e8;color:#c33'><b>{notes}</b></td></tr>")
