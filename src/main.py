@@ -24,6 +24,7 @@ from . import (
     competition,
     detail,
     eligibility,
+    floorplan,
     geo,
     lease,
     market,
@@ -344,6 +345,29 @@ def _airy(html: str) -> str:
     return spaced.replace(GAP + HR, HR)  # 구분선 앞 빈 줄은 겹쳐 보인다
 
 
+PLAN_SLOT = "평면도 사진 넣는 자리"
+
+
+def _plan_html(item: dict, name: str) -> str:
+    """평면도 칸. 자동으로 못 가져온 공고는 사람이 사진을 넣을 자리를 둔다. 둘 다 없으면 칸이 없다."""
+    plans = item.get("floor_plans") or []
+    link = item.get("plan_link") or ""
+    if not plans and not link:
+        return ""
+    out = [HR + f"<p style='{HEAD}'>📐 {escape(name)} 평면도는?</p>"]
+    for cid, label in plans:
+        out.append(f"<p><img src='cid:{cid}' width='540' alt='{escape(name)} {escape(label)} 평면도'></p>"
+                   f"<p style='{SMALL}'>{escape(label)} 평면도 · 자료: LH {escape(name)} 팸플릿</p>")
+    if plans:
+        out.append(f"<p style='{SMALL}'>※ 입주자의 이해를 돕는 개략도라 실제와 다를 수 있어요. 같은 면적도 주택형에 따라 구조가 "
+                   "달라요. 이번에 공급하는 주택형은 공고문에서 확인하세요.</p>")
+    else:
+        source = "LH 공고 팸플릿" if "lh.or.kr" in link else f"{name} 분양 홈페이지"
+        out.append(f"<p style='color:#c33;font-weight:bold'>【{PLAN_SLOT} — 사진을 넣고 이 줄을 지우세요. 안 넣으면 이 칸을 통째로 지우세요】</p>"
+                   f"<p style='{SMALL}'>자료: {escape(source)}. 개략도라 실제와 다를 수 있어요.</p>")
+    return "".join(out)
+
+
 def _result_line(r: dict) -> str:
     """주변 단지 결과 한 줄: '• 단지 84A(2026년 9월 접수)는 1순위 해당지역 61.7대 1, 당첨 최저 가점 62점이에요.'"""
     ended = r["ended"].split("-")
@@ -483,6 +507,7 @@ def readable_html(profile: dict, sale_show, lease_show, verdicts, count: int, in
             if m.get("median"):
                 out.append(f"<p style='{BODY}'>주변 비슷한 면적 아파트의 최근 실거래 중위값은 <b>{m['median'] / 1e8:.1f}억</b>이에요. "
                            "자세한 시세 추이는 아래 그래프를 참고하세요.</p>")
+        out.append(_plan_html(top, name))
         priced = cash_models(top)
         if priced:
             low = priced[0]
@@ -702,6 +727,7 @@ CHECKLIST = (
         "맞춤법: 붙여넣은 뒤 에디터의 맞춤법 검사 한 번 (직접 덧붙인 문장 포함)",
         "이미지: 발행 후 휴대폰 네이버 앱에서 썸네일·그래프가 보이는지 확인",
         "본문: 표·이미지·링크 깨짐 없음",
+        "평면도: 빨간 자리가 남아 있지 않음, 주택형·출처가 맞음",
         "안내 문구: '가상 인물 · 판정은 참고용'이 맨 끝에 남아 있음",
         "태그: 붙여넣음, 관계없는 키워드 없음",
         "카테고리: 위 카테고리 선택",
@@ -731,6 +757,8 @@ def place_images(post: str, images: dict[str, bytes], folder: Path, base_url: st
     for number, cid in enumerate(order, 1):
         if cid.startswith("thumb"):
             name, slug = "썸네일", "thumb"
+        elif cid.startswith("plan"):
+            name, slug = "평면도", "plan"
         elif cid.startswith("card"):
             name, slug = "정보카드", "card"
         else:  # 그래프 바로 앞의 공고 카드 제목(h3)이 그 그래프의 단지
@@ -759,6 +787,8 @@ def build_mail(blog: dict, title: str, tags: list[str], issues: list, post: str)
         + row.format("제목", f"<b style='white-space:nowrap'>{escape(title)}</b>")
         + row.format("태그 (입력란에 붙여넣기)", f"<b>{escape(', '.join(tags))}</b>")
         + row.format("예약 발행", escape(blog.get("publish_time") or "-"))
+        + (row.format("평면도", "<b style='color:#c33'>본문 빨간 줄 자리에 직접 넣기</b> (본문의 📐 평면도 보기 버튼이나 공고의 팸플릿에서 "
+                      "해당 주택형 확인). 안 넣으면 그 칸을 지우세요.") if PLAN_SLOT in post else "")
         + row.format("사진", "본문을 그대로 복사하면 썸네일·그래프가 사진으로 함께 들어갑니다(공개 주소 이미지). "
                      "빠진 사진만 첨부 <b>01_썸네일 · 02_시세그래프…</b>로 넣으세요.")
         + (row.format("검증 메모", notes) if not issues else
@@ -863,6 +893,8 @@ def run_one(alias, profile, args, pool, owner, posted, today) -> str | None:
     if sale_show and not competition.enrich(sale_show[0], env("ODCLOUD_SERVICE_KEY"), today):
         issues.append(validate.Issue(1, "경쟁률", "주변 단지 경쟁률을 못 가져와 그 칸 없이 나감"))
     images: dict[str, bytes] = {}
+    if sale_show:
+        floorplan.enrich(sale_show[0], env("ODCLOUD_SERVICE_KEY"), images)
     count = len(sale_new) + len(lease_new)
     intro = readable_html(profile, sale_show, lease_show, verdicts, count,
                           intro_html(alias, blog, sale_show, lease_show, verdicts, count, today, short=True), today, images)
@@ -984,6 +1016,12 @@ if __name__ == "__main__":
     if os.environ.get("SELFTEST"):
         geo.selfcheck()
         competition.selfcheck()
+        floorplan.selfcheck()
+        slot = _plan_html({"plan_link": "http://a.example"}, "가나 단지")
+        assert PLAN_SLOT in slot and "가나 단지 분양 홈페이지" in slot, slot
+        slot = _plan_html({"floor_plans": [("plan0@blog", "46A1")]}, "가나 단지")
+        assert PLAN_SLOT not in slot and "cid:plan0@blog" in slot and "자료: LH 가나 단지 팸플릿" in slot, slot
+        assert _plan_html({}, "가나 단지") == ""
         line = _result_line({"name": "가나 단지", "ended": "2026-09-30", "type": "084.9115A", "rate": 61.69, "short": None,
                              "supply": 91, "low": 62, "average": 66})
         assert "84A(2026년 9월 접수)는 1순위 해당지역 <b>61.7대 1</b>, 당첨 최저 가점 <b>62점</b>·평균 66점이에요." in line, line
