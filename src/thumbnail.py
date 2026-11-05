@@ -25,6 +25,7 @@ import io
 from matplotlib import font_manager, patheffects
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
+from matplotlib.image import imread
 from matplotlib.patches import Circle, FancyBboxPatch, Rectangle, Wedge
 
 FONTS = ("NanumGothic", "Malgun Gothic", "AppleGothic", "Noto Sans CJK KR")
@@ -177,7 +178,65 @@ def card_png(model_no: int, label: str, date_line: str, checks: list[str], stamp
     return buf.getvalue()
 
 
+def info_card(title: str, rows: list[tuple[str, str]], split: float = 0.36, size: int = 24,
+              chart: bytes | None = None, notes: tuple[str, ...] = ()) -> bytes | None:
+    """정보 카드. 왼쪽 항목, 오른쪽 값. split 은 항목 칸 오른쪽 끝. 글꼴이 없으면 None.
+
+    chart 를 주면 정보 줄 아래에 notes(설명)와 그 그래프를 함께 그린다."""
+    font = korean_font()
+    if not font or not rows:
+        return None
+    heavy = _heavy_font(font)
+    step = 0.9 if len(rows) <= 5 else 0.72  # 줄이 많으면 촘촘하게
+    picture = imread(io.BytesIO(chart), format="png") if chart else None
+    chart_h = 7.2 * 0.9 * picture.shape[0] / picture.shape[1] if chart else 0.0
+    extra = chart_h + 0.34 * len(notes) + 0.35 if chart else 0.0
+    height = 1.5 + step * len(rows) + extra  # 인치. 줄 수만큼 세로로 늘인다
+    fig = Figure(figsize=(7.2, height), dpi=150)
+    FigureCanvasAgg(fig)
+    fig.patch.set_facecolor("white")
+    ax = fig.add_axes((0, 0, 1, 1))
+    ax.set_axis_off()
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, height)
+    renderer = fig.canvas.get_renderer()
+
+    def write(x, y, text, size, color, family=font, ha="left", right=0.95, left=0.05):
+        t = ax.text(x, y, text, color=color, fontsize=size, fontfamily=family, ha=ha, va="center", fontweight="bold")
+        while size > 9:  # 길면 칸 안에 들어올 때까지 줄인다
+            box = t.get_window_extent(renderer)
+            if box.x1 <= right * fig.bbox.width and box.x0 >= left * fig.bbox.width:
+                break
+            size -= 1
+            t.set_fontsize(size)
+
+    ax.add_patch(Rectangle((0, height - 1.1), 1, 1.1, facecolor=BLUE, edgecolor="none"))
+    write(0.05, height - 0.55, title, 30, "white", family=heavy)
+    for i, (label, value) in enumerate(rows):
+        y = height - 1.1 - step / 2 - step * i
+        write(0.05, y, label, size - 3, "#5a6270", right=split)
+        write(0.95, y, value, size, INK, ha="right", left=split + 0.02)
+        if i < len(rows) - 1:
+            ax.plot([0.05, 0.95], [y - step / 2, y - step / 2], color="#e3e6eb", linewidth=1.5)
+    if chart:
+        top = height - 1.1 - step * len(rows)
+        ax.plot([0.05, 0.95], [top, top], color="#e3e6eb", linewidth=1.5)
+        for i, note in enumerate(notes):
+            write(0.05, top - 0.28 - 0.34 * i, note, 13, "#5a6270")
+        inset = fig.add_axes((0.05, 0.5 / height, 0.9, chart_h / height))
+        inset.imshow(picture)
+        inset.set_axis_off()
+    ax.add_patch(Rectangle((0, 0), 1, 0.4, facecolor=INK, edgecolor="none"))
+    write(0.95, 0.2, "부동산&청약 공부 기록장", 13, "white", ha="right")
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png")
+    return buf.getvalue()
+
+
 if __name__ == "__main__":
+    card = info_card("의왕역 한신더휴 일정", [("접수", "10월 12일~10월 14일"), ("발표", "10월 20일")])
+    assert card is None or card[:4] == b"\x89PNG"
     png = card_png(3, "맞벌이 신혼부부", "10월 12일 기준",
                    ["무주택 세대구성원", "혼인 7년 이내", "청약통장 6개월 이상"], "신청 가능",
                    "의왕역 한신더휴", "D-6", icons=["woman", "man", "girl", "boy"],

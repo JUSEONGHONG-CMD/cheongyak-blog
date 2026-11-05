@@ -21,8 +21,10 @@ from pathlib import Path
 from . import (
     applyhome,
     builder,
+    competition,
     detail,
     eligibility,
+    floorplan,
     geo,
     lease,
     market,
@@ -131,12 +133,15 @@ def intro_html(alias: str, blog: dict, sale_show, lease_show, verdicts, count: i
         top = sale_show[0]
         route = best_route(verdicts.get(applyhome_key(top)))
         where = " · ".join(x for x in (str(top.get("area_name") or ""), dday(top)) if x)
-        top_name = plain_name(top["name"])
+        top_name = title_name(top["name"])
         line = f"가장 먼저 볼 곳은 <b>{escape(top_name)}</b>({escape(where)}){validate.josa(top_name, '으로')}"
         line += f", {escape(route)} 자격으로 넣을 수 있어요." if route else " 신청할 수 있어요."
-        if short:  # 읽기용 본문은 바로 아래 '핵심 3줄 요약'이 자격·분양가를 말한다
-            line = (f"이번에 가장 먼저 볼 곳은 <b>{escape(top_name)}</b>"
-                    f"{'이에요' if validate.josa(top_name, '이') == '이' else '예요'}.")
+        if short:  # 글 첫 문장 = 단지명 + 결론. 매번 같은 인사로 시작하면 글이 서로 비슷해 보인다
+            ends = [d for d in (top.get("special_end"), top.get("general_end")) if d]
+            how = (f"{escape(route)}{validate.josa(route, '으로')} 넣을 수 있어요"
+                   if route_sure(verdicts.get(applyhome_key(top)), route) else "넣을 수 있는지 공고문 확인이 필요해요")
+            line = (f"<b>{escape(top_name)}</b>{validate.josa(top_name, '은')} {escape(blog['label'])} 조건이면 {how}."
+                    + (f" 접수 마감은 {_md(max(ends))}이에요." if ends else ""))
         m = top.get("market") or {}
         if m.get("gap_pct") is not None and top.get("price_min") and not short:
             side = "저렴해요" if m["gap_pct"] < 0 else "비싸요"
@@ -147,6 +152,11 @@ def intro_html(alias: str, blog: dict, sale_show, lease_show, verdicts, count: i
         special = sum(1 for x in sale_show if "특공" in best_route(verdicts.get(applyhome_key(x))))
         if special > 1:
             lines.append(f"특별공급으로 넣을 수 있는 분양 공고는 {special}곳이에요.")
+    elif lease_show and short:
+        top = lease_show[0]
+        top_name = title_name(lease_title(top["name"]))
+        lines.insert(0, f"<b>{escape(top_name)}</b>{validate.josa(top_name, '은')} {escape(blog['label'])} 조건이면 "
+                        f"{escape(top['kind'].split('(')[0])} 유형으로 신청할 수 있고, 접수 마감은 {_md(top['deadline'])}이에요.")
     if lease_show:
         kinds = list(dict.fromkeys(x["kind"].split("(")[0] for x in lease_show))
         first = min(x["deadline"] for x in lease_show)
@@ -185,8 +195,14 @@ CHECKS = {
     "청년": ("만 19~39세 미혼", "본인 무주택", "소득 기준 충족"),
     "신혼·신생아Ⅱ": ("혼인 7년 이내·예비신혼", "무주택 세대구성원", "소득 기준 충족"),
 }
+ENGAGED_CHECK = "예비신혼부부 (혼인 예정)"
 LOOSE_CHECKS = ("청약통장 없이 신청", "거주지 제한 없음", "만 19세 이상")  # 오피스텔·도시형 등
 LEASE_CHECKS = ("무주택 세대구성원", "소득·자산 기준 충족", "자세한 기준은 공고문")
+
+
+def person_checks(checks, label: str) -> tuple[str, ...]:
+    """혼인 전 인물에게 '혼인 7년 이내'는 맞지 않는다. 신혼 특공은 예비신혼부부 자격으로 판정한다."""
+    return tuple(ENGAGED_CHECK if "예비" in label and c.startswith("혼인 7년") else c for c in checks)
 
 
 def family_icons(profile: dict) -> list[str]:
@@ -206,7 +222,7 @@ def card_text(alias: str, profile: dict, sale_show, lease_show, verdicts, today:
         kind = soonest["base_kind"] if soonest.get("base_kind") in CHECKS else soonest["kind"].split("(")[0]
         checks = CHECKS.get(kind, LEASE_CHECKS)
         sure = soonest.get("sure", True)  # 상세 유형(든든전세·청년·신혼Ⅱ)은 who 로 이미 걸렀다
-        name = lease_title(soonest["name"])
+        name = title_name(lease_title(soonest["name"]))
         facts = " · ".join(x for x in (soonest["kind"].split("(")[0], soonest.get("region"),
                                        f"{soonest['houses']}호" if soonest.get("houses") else "") if x)
     else:
@@ -214,14 +230,14 @@ def card_text(alias: str, profile: dict, sale_show, lease_show, verdicts, today:
         route = best_route(verdict).replace("❔", "")
         checks = CHECKS.get(route, LOOSE_CHECKS)
         sure = bool(verdict and verdict.possible)
-        name = plain_name(soonest["name"])
+        name = title_name(soonest["name"])
         kind = detail.kind_word(soonest).split("(")[0].replace(" 물량", "")
         facts = " · ".join(x for x in (kind, detail.areas_text(soonest), detail.price_span(soonest)) if x)
     left = days_left(soonest, today)
     number = int(re.sub(r"\D", "", alias.split("-")[0]) or 0)
     return {
         "model_no": number, "label": profile["blog"]["label"], "date_line": f"{today.month}월 {today.day}일 기준",
-        "checks": list(checks), "stamp": "신청 가능" if sure else "확인 필요", "name": name,
+        "checks": list(person_checks(checks, profile["blog"]["label"])), "stamp": "신청 가능" if sure else "확인 필요", "name": name,
         "verb": "지원할 수 있어요" if sure else "확인해 보세요", "facts": facts,
         "dday": f"D-{left}" if left < 999 else "",
         "icons": family_icons(profile),
@@ -235,6 +251,7 @@ def card_text(alias: str, profile: dict, sale_show, lease_show, verdicts, today:
 # 섹션 → ❓ 자주 묻는 질문 → 마무리. 서식(가운데 정렬·인용구·hr·글자 크기·2~3칸 표)은 Gmail→네이버 붙여넣기
 # 시험(2026-10-28)에서 모두 살아났다. 지금까지 보내던 정보는 그 아래 '📂 자세히 보기'에 그대로 둔다.
 BLOG_NAME = "부동산&청약 공부 기록장"
+COMMENT_ASK = "💬 더 알고 싶은 정보가 있으면 댓글로 알려 주세요!<br>다음 포스팅부터 반영해 볼게요."
 BODY = "font-size:17px;line-height:1.8"
 HEAD = "font-size:22px;font-weight:bold;margin:28px 0 12px"
 SMALL = "font-size:13px;color:#888;line-height:1.7"
@@ -289,17 +306,106 @@ def _route_sentence(route, label: str) -> str:
     return text + (f" <span style='color:#666'>({escape(route.reason)})</span>" if route.reason else "")
 
 
+GAP = "<p>&nbsp;</p>"  # 빈 줄. 에디터가 문단 여백을 버려도 남도록 여백 대신 빈 문단을 쓴다
+LINE_MAX = 30  # 쉼표에서 줄을 나눌 때 한 줄 글자 수. 휴대폰 한 줄에 가깝다
+
+
+def _split(text: str, boundary: str) -> list[str]:
+    """boundary 뒤에서 나눈다. 태그·괄호 안에서는 나누지 않는다(형광펜이 끊기면 서식이 깨진다)."""
+    parts, start = [], 0
+    for m in re.finditer(boundary, text):
+        head = text[start:m.start()]
+        tags = len(re.findall(r"<(?!/|br)[^>]*>", head)) - len(re.findall(r"</", head))
+        if tags == 0 and head.count("(") == head.count(")"):
+            parts.append(text[start:m.start() + 1])
+            start = m.end()
+    tail = text[start:]
+    if parts and tail and not re.search(r"[가-힣A-Za-z0-9]", tail):  # 끝에 남은 이모지만 따로 줄을 차지하지 않게
+        parts[-1] += " " + tail
+        return parts
+    return [*parts, tail] if tail else parts
+
+
+def _lines(sentence: str) -> list[str]:
+    """긴 문장은 쉼표에서 나누되, 짧은 조각은 앞줄에 붙인다."""
+    plain = lambda x: re.sub(r"<[^>]+>", "", x)  # noqa: E731
+    out: list[str] = []
+    for piece in _split(sentence, r",\s"):
+        if out and len(plain(out[-1])) + len(plain(piece)) < LINE_MAX:
+            out[-1] += " " + piece
+        else:
+            out.append(piece)
+    return out
+
+
+def _airy(html: str) -> str:
+    """읽기용 본문의 줄바꿈: 문장마다 새 줄, 두 문장마다 빈 줄. 휴대폰에서 글이 덩어리로 보이지 않게 한다."""
+    def paragraph(m: re.Match) -> str:
+        sentences = _split(m.group(2), r"(?<=[요다)])\.\s")
+        out = []
+        for number, sentence in enumerate(sentences, 1):
+            out += [f"<p style='{BODY};margin:0'>{line}</p>" for line in _lines(sentence)]
+            if number % 2 == 0 and number < len(sentences):
+                out.append(GAP)
+        return "".join(out) + GAP
+    spaced = re.sub(rf"<p style='{re.escape(BODY)}(;margin:6px 0)?'>(.*?)</p>", paragraph, html, flags=re.S)
+    return spaced.replace(GAP + HR, HR)  # 구분선 앞 빈 줄은 겹쳐 보인다
+
+
+def _plan_html(item: dict, name: str) -> str:
+    """평면도 칸. 자동으로 못 가져온 공고는 공식 사이트로 바로 가는 링크를 둔다. 둘 다 없으면 칸이 없다."""
+    plans = item.get("floor_plans") or []
+    link = item.get("plan_link") or ""
+    if not plans and not link:
+        return ""
+    out = [HR + f"<p style='{HEAD}'>📐 {escape(name)} 평면도는?</p>"]
+    for cid, label in plans:
+        out.append(f"<p><img src='cid:{cid}' width='540' alt='{escape(name)} {escape(label)} 평면도'></p>"
+                   f"<p style='{SMALL}'>{escape(label)} 평면도 · 자료: LH {escape(name)} 팸플릿</p>")
+    if plans:
+        out.append(f"<p style='{SMALL}'>※ 입주자의 이해를 돕는 개략도라 실제와 다를 수 있어요. 같은 면적도 주택형에 따라 구조가 "
+                   "달라요. 이번에 공급하는 주택형은 공고문에서 확인하세요.</p>")
+    else:
+        where = "LH 공고 페이지의 팸플릿" if "lh.or.kr" in link else "분양 홈페이지"
+        out.append(f"<p style='{BODY}'>주택형별 평면도는 {where}에서 볼 수 있어요.</p>"
+                   f"<p style='{BODY}'><a href='{escape(link)}' style='color:#06c;font-weight:bold'>👉 평면도 보러가기</a></p>")
+    return "".join(out)
+
+
+def _result_line(r: dict) -> str:
+    """주변 단지 결과 한 줄: '• 단지 84A(2026년 9월 접수)는 1순위 해당지역 61.7대 1, 당첨 최저 가점 62점이에요.'"""
+    ended = r["ended"].split("-")
+    head = f"• <b>{escape(r['name'])}</b> {escape(_type(r['type']))}({ended[0]}년 {int(ended[1])}월 접수)"
+    if r["rate"] is not None:
+        text = f"{head}{validate.josa(_type(r['type']), '은')} 1순위 해당지역 <b>{r['rate']:.1f}대 1</b>"
+    else:
+        text = (f"{head}{validate.josa(_type(r['type']), '은')} 1순위 해당지역에서 <b>{r['short']}세대 미달</b>"
+                f"(공급 {r['supply']}세대)")
+    if r["low"]:
+        text += f", 당첨 최저 가점 <b>{r['low']}점</b>" + (f"·평균 {r['average']}점" if r["average"] else "")
+    return f"<p style='{BODY};margin:6px 0'>{text}이에요.</p>"
+
+
+def route_sure(verdict, route: str) -> bool:
+    """제목·요약에 쓴 대표 경로가 '가능'인가. best_route 는 확인 필요(❔) 경로도 고를 수 있다."""
+    return bool(verdict) and route in [notify_email.short_route(r.name) for r in verdict.possible]
+
+
+def cash_models(item: dict) -> list[dict]:
+    """필요 현금을 계산할 주택형: 가장 싼 것과 가장 비싼 것."""
+    priced = sorted((x for x in item.get("matched_models") or [] if x.get("price")), key=lambda x: x["price"])
+    return priced[:1] + priced[-1:] if len(priced) > 1 else priced
+
+
 def readable_html(profile: dict, sale_show, lease_show, verdicts, count: int, intro: str, today: date) -> str:
     """원고 앞쪽 읽기용 본문. 대표 공고 하나를 중심으로 질문형 섹션을 만든다."""
     blog = profile["blog"]
     label = blog["label"]
     top = (sale_show or lease_show)[0]
     is_lease = "deadline" in top
-    name = lease_title(top["name"]) if is_lease else plain_name(top["name"])
+    name = title_name(lease_title(top["name"]) if is_lease else top["name"])
     eun = validate.josa(name, "은")
-    out = [f"<p style='text-align:center;{BODY}'>안녕하세요! 조건별로 넣을 수 있는 청약을 골라 드리는 "
-           f"<b>{BLOG_NAME}</b>입니다. 🏠</p>",
-           re.sub(r"<p style='[^']*'>", f"<p style='{BODY}'>", intro, count=1)]
+    out = [re.sub(r"<p style='[^']*'>", f"<p style='{BODY}'>", intro, count=1)]
 
     # 📌 핵심 3줄 요약
     if is_lease:
@@ -322,13 +428,13 @@ def readable_html(profile: dict, sale_show, lease_show, verdicts, count: int, in
             third += f"으로 주변 시세보다 약 {abs(m['gap_pct']):.0f}% {'저렴해요' if m['gap_pct'] < 0 else '비싸요'}."
         else:
             third += "예요." if third else "분양가는 공고문에서 확인해요."
-        sure = bool(verdict and verdict.possible)
+        sure = route_sure(verdict, route)
         lines = [f"① {escape(name)}{eun} {_hl(_span(min(begins, default=None), max(ends, default=None)))} "
                  f"접수해요 ({dday(top)}).",
                  f"② {escape(label)} 조건이면 "
                  f"{_hl(escape(route or '청약')) if sure else '<b>' + escape(route or '청약') + '</b>'}"
                  f"{validate.josa(route or '청약', '으로')} "
-                 + ("넣을 수 있어요." if verdict and verdict.possible else "넣을 수 있는지 공고문 확인이 필요해요."),
+                 + ("넣을 수 있어요." if sure else "넣을 수 있는지 공고문 확인이 필요해요."),
                  f"③ {third}"]
     out.append(f"<blockquote style='{QUOTE}'><b>📌 핵심 3줄 요약</b><br>{'<br>'.join(lines)}</blockquote>")
     out.append(f"<p style='{SMALL}'>※ 이 글은 {today.year}년 {today.month}월 {today.day}일 청약홈·LH 공고를 기준으로 "
@@ -367,7 +473,7 @@ def readable_html(profile: dict, sale_show, lease_show, verdicts, count: int, in
                 seen_names.add(short)
                 said.append(f"<p style='{BODY};margin:6px 0'>• {_route_sentence(r, label)}</p>")
         out += said[:4] or [f"<p style='{BODY}'>신청 방법은 아래 자세히 보기에서 확인해 주세요.</p>"]
-    checks = card_text_checks(top, verdicts)
+    checks = person_checks(card_text_checks(top, verdicts), label)
     if checks:
         out.append(f"<p style='{BODY}'>신청 전에 이 세 가지를 확인하세요: "
                    + " · ".join(f"<b>{escape(c)}</b>" for c in checks) + ".</p>")
@@ -389,6 +495,31 @@ def readable_html(profile: dict, sale_show, lease_show, verdicts, count: int, in
             if m.get("median"):
                 out.append(f"<p style='{BODY}'>주변 비슷한 면적 아파트의 최근 실거래 중위값은 <b>{m['median'] / 1e8:.1f}억</b>이에요. "
                            "자세한 시세 추이는 아래 그래프를 참고하세요.</p>")
+        out.append(_plan_html(top, name))
+        priced = cash_models(top)
+        if priced:
+            low = priced[0]
+            out.append(HR + f"<p style='{HEAD}'>💵 {escape(name)}, 내 돈은 얼마 필요할까?</p>")
+            out.append(f"<p style='{BODY}'>가장 낮은 {escape(_type(low.get('type_name')))} 기준이에요. 계약금이 10%라면 계약 때 "
+                       f"약 <b>{_money(low['price'] * 0.1)}</b>이 먼저 필요해요. 입주 때까지 대출을 분양가의 60% 받는다면 내 돈은 "
+                       f"약 {_hl(_money(low['price'] * 0.4))}, 40%만 받는다면 약 <b>{_money(low['price'] * 0.6)}</b>이에요.</p>")
+            out.append(_table(("주택형", "대출 60%일 때", "대출 40%일 때"),
+                              [(_type(x.get("type_name")), _money(x["price"] * 0.4), _money(x["price"] * 0.6))
+                               for x in priced]))
+            out.append(f"<p style='{SMALL}'>※ 계약금 10%와 대출 비율은 이해를 돕는 가정이에요. 실제 납부 비율은 공고문에서, 대출 한도는 "
+                       "소득·규제에 따라 은행에서 확인하세요. 발코니 확장·옵션비와 취득세는 빠진 금액이에요."
+                       + (" 지분적립형은 남은 지분을 나눠 사는 방식이라 입주 뒤 추가 납입금이 있어요." if "지분적립" in str(top["name"]) else "")
+                       + "</p>")
+
+    # 📊 주변 단지 결과. 이 단지는 접수 전이라 경쟁률이 없다
+    results = [] if is_lease else top.get("nearby_results") or []
+    if results:
+        out.append(HR + f"<p style='{HEAD}'>📊 주변 단지 경쟁률은 어땠을까?</p>")
+        out.append(f"<p style='{BODY}'>{escape(name)}{eun} 아직 접수 전이라, 같은 지역에서 최근 접수가 끝난 단지를 참고해 보세요.</p>")
+        out += [_result_line(r) for r in results]
+        out.append(f"<p style='{SMALL}'>※ 이 단지의 결과가 아니라 참고 자료예요. 같은 시·군·구에서 최근 1년 안에 접수한 단지 중 "
+                   f"평형이 가까운 주택형을 골랐어요. 접수 건수는 나중에 달라질 수 있어요. "
+                   f"(청약홈, {today.month}월 {today.day}일 조회)</p>")
 
     # 🔎 함께 볼 공고
     others = [x for x in (*sale_show, *lease_show) if x is not top]
@@ -396,7 +527,7 @@ def readable_html(profile: dict, sale_show, lease_show, verdicts, count: int, in
         out.append(HR + f"<p style='{HEAD}'>🔎 이번에 함께 볼 공고</p>")
         for x in others:
             if "deadline" in x:
-                text = (f"{lease_title(x['name'])} — {x['kind'].split('(')[0]}, {x.get('region') or ''}, "
+                text = (f"{lease_title(x['name'])} — {x['kind'].split('(')[0]} · {x.get('region') or ''} · "
                         f"{_md(x['deadline'])} 마감")
             else:
                 text = detail.summary_sentence(x)
@@ -426,8 +557,8 @@ def readable_html(profile: dict, sale_show, lease_show, verdicts, count: int, in
 
     out.append(HR + f"<p style='{BODY}'>{escape(label)} 조건이라면 <b>{escape(name)}</b>부터 확인해 보세요. "
                "아래 <b>📂 자세히 보기</b>에 공고별 상세 정보와 시세 그래프를 정리했어요. "
-               "도움이 되셨다면 저장해 두고 신청 전에 다시 확인해 보세요.</p>")
-    return "".join(out)
+               f"도움이 되셨다면 저장해 두고 신청 전에 다시 확인해 보세요. 새 공고가 나오면 <b>{BLOG_NAME}</b>에서 계속 정리할게요. 🏠</p>")
+    return _airy("".join(out))
 
 
 def card_text_checks(top: dict, verdicts: dict) -> tuple[str, ...]:
@@ -447,17 +578,16 @@ def build_post(blog: dict, sale_show, verdicts, degraded, lease_show, rest, intr
         intro,
         HR + f"<p style='{HEAD}'>📂 자세히 보기</p>"
         f"<p style='{SMALL}'>공고별 상세 정보(위치·일정·주택·시세 그래프·특공 판정·신청 방법)를 모았어요.</p>",
-        "<div style='background:#f6f8fa;border-radius:8px;padding:14px 18px;margin-bottom:20px'>"
         f"<p style='margin:0 0 6px'><b>👤 이 글의 모델 — {escape(blog['category'])}</b></p>"
         f"<p style='margin:0 0 6px'>{escape(blog.get('intro') or '')}</p>"
-        f"<ul style='margin:0;padding-left:18px;font-size:14px'>{facts}</ul></div>",
+        f"<ul style='margin:0 0 20px;padding-left:18px;font-size:14px'>{facts}</ul>",
     ]
     if sale_show:
         html = notify_email.build_html(sale_show, verdicts, today, degraded, applyhome_key, images)
         html = html.replace(f"🏠 오늘의 청약 · {today:%Y년 %m월 %d일}", "🏠 분양 (청약홈)")
         out.append(body_of(html).replace(notify_email.CHECKS_MARK, ""))
     if lease_show:
-        out.append(lease.html_section(lease_show, today))
+        out.append(lease.html_section(lease_show, today, images, notify_email.CARD_MAX - min(len(sale_show), notify_email.CARD_MAX)))
     if rest:
         out.append("<h3 style='margin:24px 0 6px'>📋 계속 접수 중인 공고</h3><ul style='font-size:14px'>"
                    + "".join(one_liner(x, today) for x in rest) + "</ul>")
@@ -469,6 +599,7 @@ def build_post(blog: dict, sale_show, verdicts, degraded, lease_show, rest, intr
         f"<p style='{SMALL}'>[참고 출처 및 기준일] 한국부동산원 청약홈 · LH청약플러스 · 국토교통부 실거래가 공개시스템 · "
         f"확인일 {today.year}년 {today.month}월 {today.day}일</p>"
     )
+    out.append(HR + f"<p style='text-align:center;font-size:22px;font-weight:bold;line-height:1.7;margin:32px 0'>{COMMENT_ASK}</p>" + HR)
     return "".join(out)
 
 
@@ -500,17 +631,32 @@ def best_route(verdict) -> str:
     return next((n for n in names if "특공" in n), names[0] if names else "")
 
 
+def title_name(name) -> str:
+    """제목용 단지명. 공고 꼬리말을 떼고 띄어쓰기 단위로 줄인다(단어 중간에서 자르면 '공공임대주택 기'가 된다)."""
+    short = re.sub(r"\s*(?:추가\s*입주|입주자\s*모집|모집\s*공고).*$", "", plain_name(name))
+    short = re.sub(r"\s*(?:공공)?분양주택$", "", short)
+    return thumbnail.short_name(re.sub(r"^LH임대주택\s*", "", short) or str(name), 28)
+
+
 def post_title(blog: dict, top: dict, route: str, count: int, today: date) -> str:
-    """네이버는 제목 앞쪽 단어를 검색에 크게 본다. 유입 검색어가 '단지명 + 평수·오피스텔·민간임대'
-    꼴이라(2026-10-13 통계) 단지명 다음에 유형과 평수·분양가를 둔다. count 는 본문 도입부에 있다."""
+    """네이버는 제목 앞쪽 단어를 검색에 크게 본다. 유입 검색어가 '단지명 + 평수·분양가'
+    꼴이고 실제로 '평수' 검색에서 1~2위를 했다(2026-11-05 측정). 그 뒤에 읽는 사람이 궁금해할 질문을 붙인다.
+    질문의 답은 본문에 있어야 한다: '내 돈'은 분양가가 있을 때만 쓴다."""
     when = f"({blog['label']} 기준, {today.month}/{today.day})"
     if "deadline" in top:  # LH 임대
-        return f"{lease_title(top['name'])[:28]} {top['kind'].split('(')[0]} 보증금·입주 자격 {when}"
-    name = plain_name(top["name"])[:28]
+        name = title_name(lease_title(top["name"]))
+        kind = top["kind"].split("(")[0]
+        return " ".join(x for x in (name, "" if kind in name else kind, "보증금·입주 자격, 얼마 필요할까?", when) if x)
+    name = title_name(top["name"])
     kind = detail.kind_word(top).split("(")[0].replace(" 물량", "")
-    kind = "" if kind.split()[-1] in name else kind  # '… 오피스텔 오피스텔'처럼 겹치지 않게
-    what = f"{route} 자격" if "특공" in route else "청약 자격"
-    return " ".join(x for x in (name, kind, "평수·분양가·" + what, when) if x)
+    if kind.endswith("아파트"):  # '민간분양 아파트'는 아무도 검색하지 않고 제목만 길어진다
+        kind = "공공분양" if kind.startswith("공공") and "신혼희망타운" not in name else ""
+    elif kind.split()[-1] in name:  # '… 오피스텔 오피스텔'처럼 겹치지 않게
+        kind = ""
+    ask = "내 돈 얼마 필요할까?" if cash_models(top) else "넣을 수 있을까?"
+    if top.get("category") in ANYONE and cash_models(top):
+        ask = "통장 없이 " + ask
+    return " ".join(x for x in (name, kind, f"평수·분양가·자격, {ask}", when) if x)
 
 
 def post_tags(blog: dict, sale_show: list, lease_show: list, verdicts: dict, today: date) -> list[str]:
@@ -599,11 +745,10 @@ def place_images(post: str, images: dict[str, bytes], folder: Path, base_url: st
     for number, cid in enumerate(order, 1):
         if cid.startswith("thumb"):
             name, slug = "썸네일", "thumb"
-        else:  # 그래프 바로 앞의 공고 카드 제목(h3)이 그 그래프의 단지
-            head = re.findall(r"<h3[^>]*>(.*?)</h3>", post[: post.find(f"cid:{cid}")], re.S)
-            # 카드 제목 '🔴 마감임박 1. 쌍용 더 플래티넘 한강' 에서 순번 앞부분을 떼고 단지명만
-            title = re.sub(r"^.*?\d+\.\s*", "", re.sub(r"<[^>]+>", "", head[-1]).strip()) if head else ""
-            name, slug = "시세그래프_" + compact(title)[:20], "chart"
+        elif cid.startswith("plan"):
+            name, slug = "평면도", "plan"
+        else:
+            name, slug = "정보카드", "card"
         public_name = f"{number:02d}_{slug}.png"  # 주소에는 한글을 쓰지 않는다
         (folder / public_name).write_bytes(images[cid])
         files.append((f"{number:02d}_{name}.png", images[cid], "image/png"))
@@ -621,11 +766,12 @@ def build_mail(blog: dict, title: str, tags: list[str], issues: list, post: str)
         "<table style='background:#fffbe6;border:1px solid #f0d78c;border-collapse:collapse;"
         "font-size:13px;margin-bottom:12px'>"
         + row.format("카테고리", escape(blog["category"]))
-        + row.format("제목", f"<b>{escape(title)}</b>")
+        # 줄바꿈된 제목을 복사하면 띄어쓰기가 사라진다('아파트평수'). 한 줄로 둔다
+        + row.format("제목", f"<b style='white-space:nowrap'>{escape(title)}</b>")
         + row.format("태그 (입력란에 붙여넣기)", f"<b>{escape(', '.join(tags))}</b>")
         + row.format("예약 발행", escape(blog.get("publish_time") or "-"))
         + row.format("사진", "본문을 그대로 복사하면 썸네일·그래프가 사진으로 함께 들어갑니다(공개 주소 이미지). "
-                     "빠진 사진만 첨부 <b>01_썸네일 · 02_시세그래프…</b>로 넣으세요.")
+                     "빠진 사진만 첨부 <b>01_썸네일 · 02_…</b>로 넣으세요.")
         + (row.format("검증 메모", notes) if not issues else
            "<tr><td style='padding:4px 10px;color:#c33'><b>검증 메모</b></td>"
            f"<td style='padding:4px 10px;background:#fde8e8;color:#c33'><b>{notes}</b></td></tr>")
@@ -725,10 +871,18 @@ def run_one(alias, profile, args, pool, owner, posted, today) -> str | None:
     issues = [*drop_suspect_numbers(sale_show),
               *validate.check_data(sale_show, verdicts, applyhome_key, today, profile.get("filters") or {}),
               *validate.check_leases(lease_show, today)]
+    if sale_show and not competition.enrich(sale_show[0], env("ODCLOUD_SERVICE_KEY"), today):
+        issues.append(validate.Issue(1, "경쟁률", "주변 단지 경쟁률을 못 가져와 그 칸 없이 나감"))
     images: dict[str, bytes] = {}
+    if sale_show:
+        floorplan.enrich(sale_show[0], env("ODCLOUD_SERVICE_KEY"), images)
     count = len(sale_new) + len(lease_new)
     intro = readable_html(profile, sale_show, lease_show, verdicts, count,
                           intro_html(alias, blog, sale_show, lease_show, verdicts, count, today, short=True), today)
+    if args.take:  # 이미 나온 공고를 쓰는 글이라 '새로'가 맞지 않는다
+        for old, new in (("이번에 새로 열린 공고", "신청할 수 있는 공고"), ("새로 넣을 수 있는 공고", "넣을 수 있는 공고"),
+                         ("눈여겨볼 새 공고", "눈여겨볼 공고"), ("새로 접수 중", "접수 중")):
+            intro = intro.replace(old, new)
     post = build_post(blog, sale_show, verdicts, degraded, lease_show, rest, intro, today, images)
     card = thumbnail.card_png(**card_text(alias, profile, sale_show, lease_show, verdicts, today))
     if card:  # 네이버는 첫 이미지를 검색 썸네일로 쓴다
@@ -739,6 +893,7 @@ def run_one(alias, profile, args, pool, owner, posted, today) -> str | None:
     top = (sale_show or lease_show)[0]
     route = best_route(verdicts.get(applyhome_key(top))) if sale_show else top["kind"].split("(")[0]
     title = post_title(blog, top, route, count, today)
+    issues += [validate.Issue(2, "제목", p) for p in validate.check_title(title)]
     tags = post_tags(blog, sale_show, lease_show, verdicts, today)
     # 본문 끝 해시태그: 본문을 복사하면 함께 따라간다
     post += f"<p style='color:#06c;font-size:13px'>{escape(' '.join(f'#{t}' for t in tags))}</p>"
@@ -800,6 +955,10 @@ def run(args: argparse.Namespace) -> int:
         for key, record in SeenStore(alias).data.items():
             posted.setdefault(key, {})[alias] = record.get("first_sent") or ""
     owner = assign(pools, everyone, posted)
+    if args.take:  # 수동 예외: 이 인물로 아직 안 쓴 공고는 다른 인물 몫이거나 다른 인물로 나갔어도 이 인물에게
+        for item in (*pools[args.take]["sale"], *pools[args.take]["leases"]):
+            if args.take not in posted.get(SeenStore.key(item), {}):
+                owner[SeenStore.key(item)] = args.take
     shared = sum(1 for k in owner if sum(any(SeenStore.key(x) == k for x in (*p["sale"], *p["leases"]))
                                           for p in pools.values()) > 1)
     print(f"새 공고 {len(owner)}건 배정 · 여러 인물에 해당하던 공고 {shared}건은 한 명에게만")
@@ -832,6 +991,7 @@ def main() -> int:
     parser.add_argument("--preview", metavar="DIR", help="메일을 보내지 않고 DIR/<별칭>.html 로 저장 (발송 이력도 안 남김)")
     parser.add_argument("--test", action="store_true", help="메일은 보내되 제목에 [시험]을 붙이고 발송 이력은 안 남김")
     parser.add_argument("--only", metavar="ALIAS", help="이 별칭들만 (쉼표로 여러 명)")
+    parser.add_argument("--take", metavar="ALIAS", help="이 인물로 아직 안 쓴 공고를 다른 인물 몫에서 가져온다. 이미 나간 공고도 포함 (--only 와 함께)")
     parser.add_argument("--max", type=int, default=int(os.environ.get("BLOG_DAILY_MAX") or 3),
                         help="한 번에 보낼 원고 수 상한 (기본 3, 환경변수 BLOG_DAILY_MAX)")
     args = parser.parse_args()
@@ -845,6 +1005,21 @@ def main() -> int:
 if __name__ == "__main__":
     if os.environ.get("SELFTEST"):
         geo.selfcheck()
+        competition.selfcheck()
+        assert person_checks(("무주택", "혼인 7년 이내"), "예비신혼") == ("무주택", ENGAGED_CHECK)
+        assert person_checks(("무주택", "혼인 7년 이내"), "신혼 맞벌이") == ("무주택", "혼인 7년 이내")
+        floorplan.selfcheck()
+        slot = _plan_html({"plan_link": "http://a.example"}, "가나 단지")
+        assert "href='http://a.example'" in slot and "평면도 보러가기" in slot and "분양 홈페이지" in slot, slot
+        slot = _plan_html({"floor_plans": [("plan0@blog", "46A1")]}, "가나 단지")
+        assert "보러가기" not in slot and "cid:plan0@blog" in slot and "자료: LH 가나 단지 팸플릿" in slot, slot
+        assert _plan_html({}, "가나 단지") == ""
+        line = _result_line({"name": "가나 단지", "ended": "2026-09-30", "type": "084.9115A", "rate": 61.69, "short": None,
+                             "supply": 91, "low": 62, "average": 66})
+        assert "84A(2026년 9월 접수)는 1순위 해당지역 <b>61.7대 1</b>, 당첨 최저 가점 <b>62점</b>·평균 66점이에요." in line, line
+        line = _result_line({"name": "가나 단지", "ended": "2026-09-30", "type": "059.9986A", "rate": None, "short": 176,
+                             "supply": 179, "low": None, "average": None})
+        assert "<b>176세대 미달</b>(공급 179세대)이에요." in line and "2026년 9월" in line, line
         notice_pdf.selfcheck()
         # 배정: 같은 공고는 특공 대상 인물에게, 이미 나간 공고는 아무에게도
         from .eligibility import Route, Verdict
@@ -889,7 +1064,35 @@ if __name__ == "__main__":
         assert s == "옥포 힐스테이트는 경상남도 거제시의 민간분양 아파트로, 전용 60·85㎡(18·26평), 분양가 3.1~4.2억이며 10월 20일에 접수가 끝나요.", s
         t = post_title({"label": "사회초년생"}, {"name": "당산역 더클래스 한강", "category": "오피스텔등",
                         "house_type": "오피스텔"}, "오피스텔 청약", 1, date(2026, 10, 12))
-        assert t == "당산역 더클래스 한강 오피스텔 평수·분양가·청약 자격 (사회초년생 기준, 10/12)", t
+        assert t == "당산역 더클래스 한강 오피스텔 평수·분양가·자격, 넣을 수 있을까? (사회초년생 기준, 10/12)", t
+        airy = _airy(f"<p style='{BODY}'>첫 문장이에요. 둘째 문장이에요. 셋째 문장이에요.</p>")
+        assert airy.count("<p style") == 3 and airy.count(GAP) == 2, airy
+        assert _split("정리할게요. 🏠", r"(?<=[요다)])\.\s") == ["정리할게요. 🏠"]
+        assert _airy(f"<p style='{BODY}'>3건이에요 (11월 5일 기준). 다음 문장이에요.</p>").count("<p style") == 2
+        assert _split("<b>가, 나</b>는 (다, 라) 마, 바", r",\s") == ["<b>가, 나</b>는 (다, 라) 마,", "바"]
+        long = "입주 때까지 대출을 분양가의 60% 받는다면 내 돈은 약 1.1억, 40%만 받는다면 약 1.7억이에요."
+        assert _lines(long) == ["입주 때까지 대출을 분양가의 60% 받는다면 내 돈은 약 1.1억,", "40%만 받는다면 약 1.7억이에요."]
+        who = {"label": "은퇴 부부"}
+        day = date(2026, 11, 4)
+        priced = [{"price": 300_000_000}, {"price": 500_000_000}, {"price": 400_000_000}]
+        assert [x["price"] for x in cash_models({"matched_models": priced})] == [300_000_000, 500_000_000]
+        t = post_title(who, {"name": "남양주왕숙 A-2블록 신혼희망타운 잔여세대 추가입주자모집공고(공공분양)", "category": "APT",
+                             "house_type": "국민", "matched_models": priced}, "일반공급", 1, day)
+        assert t == "남양주왕숙 A-2블록 신혼희망타운 잔여세대 평수·분양가·자격, 내 돈 얼마 필요할까? (은퇴 부부 기준, 11/4)", t
+        t = post_title(who, {"name": "광교 자연앤 센트레빌 공공분양주택", "category": "APT", "house_type": "국민"},
+                       "일반공급", 1, day)
+        assert t.startswith("광교 자연앤 센트레빌 공공분양 평수·분양가·자격, 넣을 수 있을까?"), t
+        t = post_title(who, {"name": "천안 롯데캐슬 더청당", "category": "무순위", "matched_models": priced}, "무순위", 1, day)
+        assert t.startswith("천안 롯데캐슬 더청당 무순위 평수·분양가·자격, 통장 없이 내 돈"), t
+        t = post_title(who, {"name": "울산 송정하우스디(B3블럭) 10년 공공임대리츠", "kind": "공공임대(10년)",
+                             "deadline": day}, "공공임대", 1, day)
+        assert t.startswith("울산 송정하우스디 10년 공공임대리츠 보증금·입주 자격"), t
+        t = title_name("LH임대주택 기장군 중소기업 근로자 공공임대주택 기숙사형 입주자 모집공고")
+        assert t == "기장군 중소기업 근로자 공공임대주택 기숙사형", t
+        assert validate.check_title("어느 단지 추가입주자모집공고 평수") and not validate.check_title(
+            "천안 롯데캐슬 더청당 무순위 평수·분양가·자격, 내 돈 얼마 필요할까? (30대 1인 기준, 11/4)")
+        fake = Verdict(routes=[Route("일반공급 추첨제", "가능", ""), Route("생애최초 특별공급", "조건부", "")])
+        assert route_sure(fake, "일반공급") and not route_sure(fake, "생애최초 특공") and not route_sure(None, "일반공급")
         assert compact("인천계양 A17블록 신혼희망타운(공공분양)(본청약)") == "인천계양A17블록신혼희망타운"
         assert town("인천광역시 부평구 산곡동 10번지") == "부평" and town("경기도 수원시 영통구") == "수원"
         assert town("세종특별자치시 산울동") == "세종"

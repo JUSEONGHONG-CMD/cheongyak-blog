@@ -28,7 +28,7 @@ from html import escape
 import requests
 from pypdf import PdfReader
 
-from . import commute, detail, geo, income_table, lease_rules
+from . import commute, detail, geo, income_table, lease_rules, thumbnail
 from .config import parse_date
 from .notice_pdf import LH_FILE, LH_LIST, LH_PDF, TIMEOUT
 
@@ -506,13 +506,6 @@ COST_NOTE = ("초기 비용=보증금 전액(잔금은 입주 때), 월세·관�
              "보증금↔월세 일부 전환 가능 · 계약금은 목록에 비율 있을 때만 표시")
 
 
-def _workplaces(leases: list[dict]) -> str:
-    for lease in leases:
-        for b in lease.get("top") or []:
-            return "·".join(b.get("commute_car") or {})
-    return ""
-
-
 # 2026-09 LH 공고문 소득 기준표(도시근로자 가구원수별 월평균소득, 1인 +20%p·2인 +10%p 가산 반영).
 # 신혼·신생아Ⅱ: 130% 이하, 맞벌이는 200% 이하. 청년 3순위: 본인 1인 가구 100% 이하.
 NEWLYWED_CAP = {
@@ -666,45 +659,36 @@ def _dday(deadline: date, today: date) -> str:
     return "오늘 마감" if left == 0 else f"D-{left}"
 
 
-def html_section(leases: list[dict], today: date) -> str:
-    small = "color:#888;font-size:11px"
+def card_rows(x: dict, today: date) -> list[tuple[str, str]]:
+    """임대 공고 카드. 값이 없는 줄은 뺀다."""
+    deposits = [d for b in x.get("top") or [] for d in b.get("deposits") or []]
+    rows = [("유형", x["kind"].split("(")[0]), ("지역", x.get("region") or ""),
+            ("모집", f"{x['houses']}호" if x.get("houses") else ""),
+            ("마감", f"{x['deadline'].month}월 {x['deadline'].day}일 ({_dday(x['deadline'], today)})"),
+            ("보증금", _won(deposits) if deposits else "공고문 확인")]
+    return [row for row in rows if row[1]]
 
-    def houses(x: dict) -> str:
-        return "".join(
-            f"<div style='margin-bottom:4px'>{rank}) {escape(head)}<br><span style='{small}'>"
-            f"{escape(facts)}</span>"
-            + (f"<br><span style='{small}'>{escape(b['nearby'])}</span>" if b.get("nearby") else "")
-            + "</div>"
-            for rank, b in enumerate(x.get("top") or [], 1)
-            for head, facts in [_house_line(b)]
-        ) or (f"<span style='{small}'>단지형 공고 — 단지 위치·면적·임대료는 공고문에서 확인하세요.</span>"
-              if x.get("complex") else
-              f"<span style='{small}'>주택목록을 읽지 못했습니다. 공고에서 확인하세요.</span>")
 
-    # 블로그는 표 대신 공고별 문단. 네이버 에디터에 붙이면 5칸 표의 너비가 깨진다
-    rows = "".join(
-        f"<p style='margin:16px 0 2px;font-size:14px'><b>{escape(x['kind'])}</b> · "
-        f"<a href='{escape(x['url'])}' style='color:#06c;text-decoration:none'>{escape(x['name'])}</a></p>"
-        f"<p style='margin:0;{small}'>{escape(x['region'])}"
-        f"{' · %d호' % x['houses'] if x.get('houses') else ''} · 마감 {x['deadline']:%m.%d}"
-        f" ({_dday(x['deadline'], today)}) · {escape(move_in(x))}</p>"
-        + f"<p style='margin:2px 0;font-size:14px'>{escape(x['region'])} {escape(x['kind'])} "
-          f"{('%d호를 ' % x['houses']) if x.get('houses') else ''}모집하며 "
-          f"{x['deadline'].month}월 {x['deadline'].day}일에 접수가 끝나요.</p>"
-        + (f"<p style='margin:0;{small}'>{escape(x['track'])}</p>" if x.get("track") else "")
-        + f"<div style='margin-top:4px;font-size:13px'>{houses(x)}</div>"
-        for x in leases
-    ) or "<p>접수 중인 공고가 없습니다.</p>"
-    workplaces = _workplaces(leases)
-    order = "통근 가까운 순" if workplaces else "마감 순, 보증금 낮은 집부터"
+def html_section(leases: list[dict], today: date, images: dict | None = None, cards: int = 0) -> str:
+    """공고마다 제목 + 한 문장. 앞쪽 cards 건은 카드 사진을 붙인다(문단이 길면 읽기 힘들고 휑해 보인다)."""
+    out = []
+    for order, x in enumerate(leases):
+        png = thumbnail.info_card(thumbnail.short_name(x["name"], 16), card_rows(x, today), split=0.2) \
+            if images is not None and order < cards else None
+        if png:
+            images[f"card{20 + order}@blog"] = png
+        out.append(
+            f"<p style='margin:14px 0 2px;font-size:15px'><b>{escape(x['kind'])}</b> · "
+            f"<a href='{escape(x['url'])}' style='color:#06c;text-decoration:none'>{escape(x['name'])}</a></p>"
+            f"<p style='margin:0;font-size:15px;line-height:1.7'>{escape(x['region'])} {escape(x['kind'])} "
+            f"{('%d호를 ' % x['houses']) if x.get('houses') else ''}모집하며 "
+            f"{x['deadline'].month}월 {x['deadline'].day}일에 접수가 끝나요.</p>"
+            + (f"<p><img src='cid:card{20 + order}@blog' width='540' alt='{escape(x['kind'])} 공고 정보'></p>" if png else ""))
     return (
-        "<h2 style='margin:28px 0 4px'>🏘 LH 임대 (전세·월세)</h2>"
-        "<p style='margin:0 0 10px;color:#666;font-size:13px'>LH · 접수 중 "
-        f"{len(leases)}건 · {order} · LH 임대 전 유형 중 신청 가능(✅)·확인 필요(❔)한 것만. "
-        "총자산은 예금 등 금융자산까지 합한 기준이니 공고문으로 확인하세요</p>"
-        f"{rows}"
-        f"<p style='margin:16px 0 4px;color:#666;font-size:12px'>💰 {escape(COST_NOTE)}</p>"
-        + (f"<p style='margin:0 0 24px;color:#b45309;font-size:12px'>{escape(leases[0]['warning'])}</p>"
+        "<h2 style='margin:24px 0 4px'>🏘 LH 임대 (전세·월세)</h2>"
+        + ("".join(out) or "<p>접수 중인 공고가 없습니다.</p>")
+        + f"<p style='margin:14px 0 4px;color:#666;font-size:12px'>💰 {escape(COST_NOTE)}</p>"
+        + (f"<p style='margin:0 0 16px;color:#b45309;font-size:12px'>{escape(leases[0]['warning'])}</p>"
            if leases and leases[0].get("warning") else "")
     )
 
