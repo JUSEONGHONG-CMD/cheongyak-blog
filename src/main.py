@@ -311,7 +311,11 @@ def _split(text: str, boundary: str) -> list[str]:
         if tags == 0 and head.count("(") == head.count(")"):
             parts.append(text[start:m.start() + 1])
             start = m.end()
-    return [*parts, text[start:]] if text[start:] else parts
+    tail = text[start:]
+    if parts and tail and not re.search(r"[가-힣A-Za-z0-9]", tail):  # 끝에 남은 이모지만 따로 줄을 차지하지 않게
+        parts[-1] += " " + tail
+        return parts
+    return [*parts, tail] if tail else parts
 
 
 def _lines(sentence: str) -> list[str]:
@@ -1033,6 +1037,7 @@ if __name__ == "__main__":
         assert t == "당산역 더클래스 한강 오피스텔 평수·분양가·자격, 넣을 수 있을까? (사회초년생 기준, 10/12)", t
         airy = _airy(f"<p style='{BODY}'>첫 문장이에요. 둘째 문장이에요. 셋째 문장이에요.</p>")
         assert airy.count("<p style") == 3 and airy.count(GAP) == 2, airy
+        assert _split("정리할게요. 🏠", r"(?<=[요다])\.\s") == ["정리할게요. 🏠"]
         assert _split("<b>가, 나</b>는 (다, 라) 마, 바", r",\s") == ["<b>가, 나</b>는 (다, 라) 마,", "바"]
         long = "입주 때까지 대출을 분양가의 60% 받는다면 내 돈은 약 1.1억, 40%만 받는다면 약 1.7억이에요."
         assert _lines(long) == ["입주 때까지 대출을 분양가의 60% 받는다면 내 돈은 약 1.1억,", "40%만 받는다면 약 1.7억이에요."]
