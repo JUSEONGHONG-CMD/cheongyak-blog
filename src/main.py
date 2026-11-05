@@ -245,6 +245,7 @@ def card_text(alias: str, profile: dict, sale_show, lease_show, verdicts, today:
 # 섹션 → ❓ 자주 묻는 질문 → 마무리. 서식(가운데 정렬·인용구·hr·글자 크기·2~3칸 표)은 Gmail→네이버 붙여넣기
 # 시험(2026-10-28)에서 모두 살아났다. 지금까지 보내던 정보는 그 아래 '📂 자세히 보기'에 그대로 둔다.
 BLOG_NAME = "부동산&청약 공부 기록장"
+COMMENT_ASK = "💬 더 알고 싶은 정보가 있으면 댓글로 알려 주세요!<br>다음 포스팅부터 반영해 볼게요."
 BODY = "font-size:17px;line-height:1.8"
 HEAD = "font-size:22px;font-weight:bold;margin:28px 0 12px"
 SMALL = "font-size:13px;color:#888;line-height:1.7"
@@ -334,7 +335,7 @@ def _lines(sentence: str) -> list[str]:
 def _airy(html: str) -> str:
     """읽기용 본문의 줄바꿈: 문장마다 새 줄, 두 문장마다 빈 줄. 휴대폰에서 글이 덩어리로 보이지 않게 한다."""
     def paragraph(m: re.Match) -> str:
-        sentences = _split(m.group(2), r"(?<=[요다])\.\s")
+        sentences = _split(m.group(2), r"(?<=[요다)])\.\s")
         out = []
         for number, sentence in enumerate(sentences, 1):
             out += [f"<p style='{BODY};margin:0'>{line}</p>" for line in _lines(sentence)]
@@ -592,6 +593,7 @@ def build_post(blog: dict, sale_show, verdicts, degraded, lease_show, rest, intr
         f"<p style='{SMALL}'>[참고 출처 및 기준일] 한국부동산원 청약홈 · LH청약플러스 · 국토교통부 실거래가 공개시스템 · "
         f"확인일 {today.year}년 {today.month}월 {today.day}일</p>"
     )
+    out.append(f"<p style='text-align:center;font-size:22px;font-weight:bold;line-height:1.7;margin:32px 0'>{COMMENT_ASK}</p>")
     return "".join(out)
 
 
@@ -943,6 +945,10 @@ def run(args: argparse.Namespace) -> int:
         for key, record in SeenStore(alias).data.items():
             posted.setdefault(key, {})[alias] = record.get("first_sent") or ""
     owner = assign(pools, everyone, posted)
+    if args.take:  # 이 인물이 넣을 수 있는 공고는 다른 인물 몫이어도 이 인물에게. 공고당 한 명은 그대로다
+        for item in (*pools[args.take]["sale"], *pools[args.take]["leases"]):
+            if SeenStore.key(item) in owner:
+                owner[SeenStore.key(item)] = args.take
     shared = sum(1 for k in owner if sum(any(SeenStore.key(x) == k for x in (*p["sale"], *p["leases"]))
                                           for p in pools.values()) > 1)
     print(f"새 공고 {len(owner)}건 배정 · 여러 인물에 해당하던 공고 {shared}건은 한 명에게만")
@@ -975,6 +981,7 @@ def main() -> int:
     parser.add_argument("--preview", metavar="DIR", help="메일을 보내지 않고 DIR/<별칭>.html 로 저장 (발송 이력도 안 남김)")
     parser.add_argument("--test", action="store_true", help="메일은 보내되 제목에 [시험]을 붙이고 발송 이력은 안 남김")
     parser.add_argument("--only", metavar="ALIAS", help="이 별칭들만 (쉼표로 여러 명)")
+    parser.add_argument("--take", metavar="ALIAS", help="이 인물이 넣을 수 있는 새 공고를 다른 인물 몫에서 가져온다 (--only 와 함께)")
     parser.add_argument("--max", type=int, default=int(os.environ.get("BLOG_DAILY_MAX") or 3),
                         help="한 번에 보낼 원고 수 상한 (기본 3, 환경변수 BLOG_DAILY_MAX)")
     args = parser.parse_args()
@@ -1048,7 +1055,8 @@ if __name__ == "__main__":
         assert t == "당산역 더클래스 한강 오피스텔 평수·분양가·자격, 넣을 수 있을까? (사회초년생 기준, 10/12)", t
         airy = _airy(f"<p style='{BODY}'>첫 문장이에요. 둘째 문장이에요. 셋째 문장이에요.</p>")
         assert airy.count("<p style") == 3 and airy.count(GAP) == 2, airy
-        assert _split("정리할게요. 🏠", r"(?<=[요다])\.\s") == ["정리할게요. 🏠"]
+        assert _split("정리할게요. 🏠", r"(?<=[요다)])\.\s") == ["정리할게요. 🏠"]
+        assert _airy(f"<p style='{BODY}'>3건이에요 (11월 5일 기준). 다음 문장이에요.</p>").count("<p style") == 2
         assert _split("<b>가, 나</b>는 (다, 라) 마, 바", r",\s") == ["<b>가, 나</b>는 (다, 라) 마,", "바"]
         long = "입주 때까지 대출을 분양가의 60% 받는다면 내 돈은 약 1.1억, 40%만 받는다면 약 1.7억이에요."
         assert _lines(long) == ["입주 때까지 대출을 분양가의 60% 받는다면 내 돈은 약 1.1억,", "40%만 받는다면 약 1.7억이에요."]
