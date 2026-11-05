@@ -161,7 +161,7 @@ def market_chart(item: dict, images: dict[str, bytes]) -> str:
         caption_html = escape(caption)
 
     return (
-        "<div style='margin-top:10px;padding-top:10px;border-top:1px dashed #e5e5e5'>"
+        "<div style='margin-top:10px'>"
         f"<div style='font-size:12px;color:#555;margin-bottom:6px'>📈 {caption_html}</div>"
         f"<img src='cid:{cid}' width='480' alt='주변 시세 추이 그래프' "
         "style='display:block;width:100%;max-width:480px;height:auto;border:0'>"
@@ -324,8 +324,7 @@ def build_html(
             continue
         url = escape((item.get("url") or "").strip())
         out.append(
-            "<div style='border:1px solid #e5e5e5;border-radius:6px;padding:12px 16px;"
-            "margin-bottom:16px'>"
+            "<div style='margin:24px 0 16px'>"  # 테두리 상자는 붙여넣으면 1칸 표가 된다
             f"<h3 style='margin:0 0 6px;font-size:15px'>"
             f"<a href='{url}' style='color:#111;text-decoration:none'>"
             f"{escape(detail.title(item))}</a></h3>"

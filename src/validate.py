@@ -214,6 +214,16 @@ def check_text(html: str) -> list[str]:
     return list(dict.fromkeys(problems))
 
 
+def check_title(title: str) -> list[str]:
+    """제목에 공고 꼬리말·잘린 흔적·겹친 단어가 남았는지."""
+    problems = check_text(title)
+    if re.search(r"모집\s*공고|추가\s*입주", title):
+        problems.append("제목에 공고 꼬리말이 남음")
+    if len(title) > 70:
+        problems.append(f"제목이 {len(title)}자로 김")
+    return problems
+
+
 def check_output(items: list[dict], html: str, images: dict[str, bytes]) -> list[Issue]:
     """2차: 받는 사람이 보게 될 메일 완성본이 온전한지."""
     issues: list[Issue] = []
