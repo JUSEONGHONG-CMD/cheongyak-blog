@@ -593,7 +593,7 @@ def build_post(blog: dict, sale_show, verdicts, degraded, lease_show, rest, intr
         f"<p style='{SMALL}'>[참고 출처 및 기준일] 한국부동산원 청약홈 · LH청약플러스 · 국토교통부 실거래가 공개시스템 · "
         f"확인일 {today.year}년 {today.month}월 {today.day}일</p>"
     )
-    out.append(f"<p style='text-align:center;font-size:22px;font-weight:bold;line-height:1.7;margin:32px 0'>{COMMENT_ASK}</p>")
+    out.append(HR + f"<p style='text-align:center;font-size:22px;font-weight:bold;line-height:1.7;margin:32px 0'>{COMMENT_ASK}</p>" + HR)
     return "".join(out)
 
 
