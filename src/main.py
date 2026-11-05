@@ -195,8 +195,14 @@ CHECKS = {
     "청년": ("만 19~39세 미혼", "본인 무주택", "소득 기준 충족"),
     "신혼·신생아Ⅱ": ("혼인 7년 이내·예비신혼", "무주택 세대구성원", "소득 기준 충족"),
 }
+ENGAGED_CHECK = "예비신혼부부 (혼인 예정)"
 LOOSE_CHECKS = ("청약통장 없이 신청", "거주지 제한 없음", "만 19세 이상")  # 오피스텔·도시형 등
 LEASE_CHECKS = ("무주택 세대구성원", "소득·자산 기준 충족", "자세한 기준은 공고문")
+
+
+def person_checks(checks, label: str) -> tuple[str, ...]:
+    """혼인 전 인물에게 '혼인 7년 이내'는 맞지 않는다. 신혼 특공은 예비신혼부부 자격으로 판정한다."""
+    return tuple(ENGAGED_CHECK if "예비" in label and c.startswith("혼인 7년") else c for c in checks)
 
 
 def family_icons(profile: dict) -> list[str]:
@@ -231,7 +237,7 @@ def card_text(alias: str, profile: dict, sale_show, lease_show, verdicts, today:
     number = int(re.sub(r"\D", "", alias.split("-")[0]) or 0)
     return {
         "model_no": number, "label": profile["blog"]["label"], "date_line": f"{today.month}월 {today.day}일 기준",
-        "checks": list(checks), "stamp": "신청 가능" if sure else "확인 필요", "name": name,
+        "checks": list(person_checks(checks, profile["blog"]["label"])), "stamp": "신청 가능" if sure else "확인 필요", "name": name,
         "verb": "지원할 수 있어요" if sure else "확인해 보세요", "facts": facts,
         "dday": f"D-{left}" if left < 999 else "",
         "icons": family_icons(profile),
@@ -467,7 +473,7 @@ def readable_html(profile: dict, sale_show, lease_show, verdicts, count: int, in
                 seen_names.add(short)
                 said.append(f"<p style='{BODY};margin:6px 0'>• {_route_sentence(r, label)}</p>")
         out += said[:4] or [f"<p style='{BODY}'>신청 방법은 아래 자세히 보기에서 확인해 주세요.</p>"]
-    checks = card_text_checks(top, verdicts)
+    checks = person_checks(card_text_checks(top, verdicts), label)
     if checks:
         out.append(f"<p style='{BODY}'>신청 전에 이 세 가지를 확인하세요: "
                    + " · ".join(f"<b>{escape(c)}</b>" for c in checks) + ".</p>")
@@ -873,6 +879,10 @@ def run_one(alias, profile, args, pool, owner, posted, today) -> str | None:
     count = len(sale_new) + len(lease_new)
     intro = readable_html(profile, sale_show, lease_show, verdicts, count,
                           intro_html(alias, blog, sale_show, lease_show, verdicts, count, today, short=True), today)
+    if args.take:  # 이미 나온 공고를 쓰는 글이라 '새로'가 맞지 않는다
+        for old, new in (("이번에 새로 열린 공고", "신청할 수 있는 공고"), ("새로 넣을 수 있는 공고", "넣을 수 있는 공고"),
+                         ("눈여겨볼 새 공고", "눈여겨볼 공고"), ("새로 접수 중", "접수 중")):
+            intro = intro.replace(old, new)
     post = build_post(blog, sale_show, verdicts, degraded, lease_show, rest, intro, today, images)
     card = thumbnail.card_png(**card_text(alias, profile, sale_show, lease_show, verdicts, today))
     if card:  # 네이버는 첫 이미지를 검색 썸네일로 쓴다
@@ -945,9 +955,9 @@ def run(args: argparse.Namespace) -> int:
         for key, record in SeenStore(alias).data.items():
             posted.setdefault(key, {})[alias] = record.get("first_sent") or ""
     owner = assign(pools, everyone, posted)
-    if args.take:  # 이 인물이 넣을 수 있는 공고는 다른 인물 몫이어도 이 인물에게. 공고당 한 명은 그대로다
+    if args.take:  # 수동 예외: 이 인물로 아직 안 쓴 공고는 다른 인물 몫이거나 다른 인물로 나갔어도 이 인물에게
         for item in (*pools[args.take]["sale"], *pools[args.take]["leases"]):
-            if SeenStore.key(item) in owner:
+            if args.take not in posted.get(SeenStore.key(item), {}):
                 owner[SeenStore.key(item)] = args.take
     shared = sum(1 for k in owner if sum(any(SeenStore.key(x) == k for x in (*p["sale"], *p["leases"]))
                                           for p in pools.values()) > 1)
@@ -981,7 +991,7 @@ def main() -> int:
     parser.add_argument("--preview", metavar="DIR", help="메일을 보내지 않고 DIR/<별칭>.html 로 저장 (발송 이력도 안 남김)")
     parser.add_argument("--test", action="store_true", help="메일은 보내되 제목에 [시험]을 붙이고 발송 이력은 안 남김")
     parser.add_argument("--only", metavar="ALIAS", help="이 별칭들만 (쉼표로 여러 명)")
-    parser.add_argument("--take", metavar="ALIAS", help="이 인물이 넣을 수 있는 새 공고를 다른 인물 몫에서 가져온다 (--only 와 함께)")
+    parser.add_argument("--take", metavar="ALIAS", help="이 인물로 아직 안 쓴 공고를 다른 인물 몫에서 가져온다. 이미 나간 공고도 포함 (--only 와 함께)")
     parser.add_argument("--max", type=int, default=int(os.environ.get("BLOG_DAILY_MAX") or 3),
                         help="한 번에 보낼 원고 수 상한 (기본 3, 환경변수 BLOG_DAILY_MAX)")
     args = parser.parse_args()
@@ -996,6 +1006,8 @@ if __name__ == "__main__":
     if os.environ.get("SELFTEST"):
         geo.selfcheck()
         competition.selfcheck()
+        assert person_checks(("무주택", "혼인 7년 이내"), "예비신혼") == ("무주택", ENGAGED_CHECK)
+        assert person_checks(("무주택", "혼인 7년 이내"), "신혼 맞벌이") == ("무주택", "혼인 7년 이내")
         floorplan.selfcheck()
         slot = _plan_html({"plan_link": "http://a.example"}, "가나 단지")
         assert "href='http://a.example'" in slot and "평면도 보러가기" in slot and "분양 홈페이지" in slot, slot
