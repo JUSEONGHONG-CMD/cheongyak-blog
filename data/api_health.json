@@ -1,22 +1,22 @@
 {
   "getAPTLttotPblancDetail": {
-    "checked": "2026-10-28",
-    "rows": 61
+    "checked": "2026-11-04",
+    "rows": 63
   },
   "getOPTLttotPblancDetail": {
-    "checked": "2026-10-28",
-    "rows": 231
+    "checked": "2026-11-04",
+    "rows": 236
   },
   "getPblPvtRentLttotPblancDetail": {
-    "checked": "2026-10-28",
-    "rows": 46
+    "checked": "2026-11-04",
+    "rows": 47
   },
   "getRemndrLttotPblancDetail": {
-    "checked": "2026-10-28",
-    "rows": 56
+    "checked": "2026-11-04",
+    "rows": 60
   },
   "getUrbtyOfctlLttotPblancDetail": {
-    "checked": "2026-10-28",
-    "rows": 16
+    "checked": "2026-11-04",
+    "rows": 14
   }
 }
