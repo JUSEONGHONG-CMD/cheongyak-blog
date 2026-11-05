@@ -390,23 +390,8 @@ def cash_models(item: dict) -> list[dict]:
     return priced[:1] + priced[-1:] if len(priced) > 1 else priced
 
 
-def _bullets(rows: list[tuple[str, str]]) -> str:
-    """카드 이미지의 내용을 글로도 남긴다. 사진 속 글자는 검색되지 않는다."""
-    return "".join(f"<p style='{BODY};margin:4px 0'>• {escape(a)}: {escape(b)}</p>" for a, b in rows) + GAP
-
-
-def _card(images: dict, number: int, title: str, rows: list[tuple[str, str]]) -> str:
-    """본문 정보 카드. 글꼴이 없으면 사진 없이 넘어간다."""
-    png = thumbnail.info_card(title, rows)
-    if not png:
-        return ""
-    images[f"card{number}@blog"] = png
-    return f"<p><img src='cid:card{number}@blog' width='540' alt='{escape(title)}'></p>"
-
-
-def readable_html(profile: dict, sale_show, lease_show, verdicts, count: int, intro: str, today: date,
-                  images: dict) -> str:
-    """원고 앞쪽 읽기용 본문. 대표 공고 하나를 중심으로 질문형 섹션을 만든다. 카드 이미지는 images 에 채운다."""
+def readable_html(profile: dict, sale_show, lease_show, verdicts, count: int, intro: str, today: date) -> str:
+    """원고 앞쪽 읽기용 본문. 대표 공고 하나를 중심으로 질문형 섹션을 만든다."""
     blog = profile["blog"]
     label = blog["label"]
     top = (sale_show or lease_show)[0]
@@ -465,7 +450,7 @@ def readable_html(profile: dict, sale_show, lease_show, verdicts, count: int, in
         out.append(f"<p style='{BODY}'>마감은 {_hl(_md(max(ends, default=None)))}이고, 당첨자 발표는 "
                    f"<b>{_md(top.get('announce_date'))}</b>이에요. 발표 뒤 계약까지 시간이 짧으니 계약금을 미리 "
                    "준비해 두세요.</p>")
-    out.append(_card(images, 1, f"{thumbnail.short_name(name, 14)} 일정", rows) + _bullets(rows))
+    out.append(_table(("구분", "일정"), rows))
 
     # ✅ 자격
     out.append(HR + f"<p style='{HEAD}'>✅ {escape(label)}도 넣을 수 있을까?</p>")
@@ -491,16 +476,15 @@ def readable_html(profile: dict, sale_show, lease_show, verdicts, count: int, in
         houses = top.get("top") or []
         if houses:
             out.append(HR + f"<p style='{HEAD}'>💰 보증금과 월세는 얼마인가요?</p>")
-            rows = [(thumbnail.short_name(b["name"], 14), lease._house_line(b)[1]) for b in houses[:5]]
-            out.append(_card(images, 2, f"{thumbnail.short_name(name, 14)} 보증금", rows) + _bullets(rows))
+            out.append(_table(("주택", "조건"), [(b["name"][:24], lease._house_line(b)[1]) for b in houses[:5]]))
     else:
         models = [x for x in (top.get("matched_models") or []) if x.get("area")][:6]
         if models:
             out.append(HR + f"<p style='{HEAD}'>💰 {escape(name)} 분양가와 평수는?</p>")
-            rows = [(_type(x.get("type_name")),
-                     f"전용 {x['area']:.0f}㎡({detail.pyeong(x['area'])}평) · "
-                     + (f"{x['price'] / 1e8:.1f}억" if x.get("price") else "공고문 확인")) for x in models]
-            out.append(_card(images, 2, f"{thumbnail.short_name(name, 14)} 평수·분양가", rows) + _bullets(rows))
+            out.append(_table(("주택형", "전용(평)", "분양가"),
+                              [(_type(x.get("type_name")),
+                                f"{x['area']:.0f}㎡({detail.pyeong(x['area'])}평)",
+                                f"{x['price'] / 1e8:.1f}억" if x.get("price") else "공고문 확인") for x in models]))
             if m.get("median"):
                 out.append(f"<p style='{BODY}'>주변 비슷한 면적 아파트의 최근 실거래 중위값은 <b>{m['median'] / 1e8:.1f}억</b>이에요. "
                            "자세한 시세 추이는 아래 그래프를 참고하세요.</p>")
@@ -891,7 +875,7 @@ def run_one(alias, profile, args, pool, owner, posted, today) -> str | None:
         floorplan.enrich(sale_show[0], env("ODCLOUD_SERVICE_KEY"), images)
     count = len(sale_new) + len(lease_new)
     intro = readable_html(profile, sale_show, lease_show, verdicts, count,
-                          intro_html(alias, blog, sale_show, lease_show, verdicts, count, today, short=True), today, images)
+                          intro_html(alias, blog, sale_show, lease_show, verdicts, count, today, short=True), today)
     post = build_post(blog, sale_show, verdicts, degraded, lease_show, rest, intro, today, images)
     card = thumbnail.card_png(**card_text(alias, profile, sale_show, lease_show, verdicts, today))
     if card:  # 네이버는 첫 이미지를 검색 썸네일로 쓴다
