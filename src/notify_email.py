@@ -246,7 +246,7 @@ def detail_table(lines: list[str], extra: dict[str, str] | None = None) -> str:
             style = "margin:0 0 0 14px;color:#666;font-size:12px" if sub else "margin:0;font-size:14px"
             parts.append(f"<p style='{style}'>{escape(text)}</p>")
         rows.append(
-            f"<p style='margin:12px 0 2px;font-size:14px'><b>▪ {escape(label)}</b></p>"
+            f"<p>&nbsp;</p><p style='margin:0 0 2px;font-size:14px'><b>▪ {escape(label)}</b></p>"
             f"{''.join(parts)}{extra.get(label, '')}"
         )
     # 블로그는 표 대신 문단으로 쓴다. 네이버 에디터가 붙여넣은 2칸 표의 너비를 제멋대로 다시 잡는다

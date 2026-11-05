@@ -297,6 +297,48 @@ def _route_sentence(route, label: str) -> str:
     return text + (f" <span style='color:#666'>({escape(route.reason)})</span>" if route.reason else "")
 
 
+GAP = "<p>&nbsp;</p>"  # 빈 줄. 에디터가 문단 여백을 버려도 남도록 여백 대신 빈 문단을 쓴다
+LINE_MAX = 30  # 쉼표에서 줄을 나눌 때 한 줄 글자 수. 휴대폰 한 줄에 가깝다
+
+
+def _split(text: str, boundary: str) -> list[str]:
+    """boundary 뒤에서 나눈다. 태그·괄호 안에서는 나누지 않는다(형광펜이 끊기면 서식이 깨진다)."""
+    parts, start = [], 0
+    for m in re.finditer(boundary, text):
+        head = text[start:m.start()]
+        tags = len(re.findall(r"<(?!/|br)[^>]*>", head)) - len(re.findall(r"</", head))
+        if tags == 0 and head.count("(") == head.count(")"):
+            parts.append(text[start:m.start() + 1])
+            start = m.end()
+    return [*parts, text[start:]] if text[start:] else parts
+
+
+def _lines(sentence: str) -> list[str]:
+    """긴 문장은 쉼표에서 나누되, 짧은 조각은 앞줄에 붙인다."""
+    plain = lambda x: re.sub(r"<[^>]+>", "", x)  # noqa: E731
+    out: list[str] = []
+    for piece in _split(sentence, r",\s"):
+        if out and len(plain(out[-1])) + len(plain(piece)) < LINE_MAX:
+            out[-1] += " " + piece
+        else:
+            out.append(piece)
+    return out
+
+
+def _airy(html: str) -> str:
+    """읽기용 본문의 줄바꿈: 문장마다 새 줄, 두 문장마다 빈 줄. 휴대폰에서 글이 덩어리로 보이지 않게 한다."""
+    def paragraph(m: re.Match) -> str:
+        sentences = _split(m.group(2), r"(?<=[요다])\.\s")
+        out = []
+        for number, sentence in enumerate(sentences, 1):
+            out += [f"<p style='{BODY};margin:0'>{line}</p>" for line in _lines(sentence)]
+            if number % 2 == 0 and number < len(sentences):
+                out.append(GAP)
+        return "".join(out) + GAP
+    spaced = re.sub(rf"<p style='{re.escape(BODY)}(;margin:6px 0)?'>(.*?)</p>", paragraph, html, flags=re.S)
+    return spaced.replace(GAP + HR, HR)  # 구분선 앞 빈 줄은 겹쳐 보인다
+
+
 def route_sure(verdict, route: str) -> bool:
     """제목·요약에 쓴 대표 경로가 '가능'인가. best_route 는 확인 필요(❔) 경로도 고를 수 있다."""
     return bool(verdict) and route in [notify_email.short_route(r.name) for r in verdict.possible]
@@ -310,7 +352,7 @@ def cash_models(item: dict) -> list[dict]:
 
 def _bullets(rows: list[tuple[str, str]]) -> str:
     """카드 이미지의 내용을 글로도 남긴다. 사진 속 글자는 검색되지 않는다."""
-    return "".join(f"<p style='{BODY};margin:4px 0'>• {escape(a)}: {escape(b)}</p>" for a, b in rows)
+    return "".join(f"<p style='{BODY};margin:4px 0'>• {escape(a)}: {escape(b)}</p>" for a, b in rows) + GAP
 
 
 def _card(images: dict, number: int, title: str, rows: list[tuple[str, str]]) -> str:
@@ -443,7 +485,7 @@ def readable_html(profile: dict, sale_show, lease_show, verdicts, count: int, in
         out.append(HR + f"<p style='{HEAD}'>🔎 이번에 함께 볼 공고</p>")
         for x in others:
             if "deadline" in x:
-                text = (f"{lease_title(x['name'])} — {x['kind'].split('(')[0]}, {x.get('region') or ''}, "
+                text = (f"{lease_title(x['name'])} — {x['kind'].split('(')[0]} · {x.get('region') or ''} · "
                         f"{_md(x['deadline'])} 마감")
             else:
                 text = detail.summary_sentence(x)
@@ -474,7 +516,7 @@ def readable_html(profile: dict, sale_show, lease_show, verdicts, count: int, in
     out.append(HR + f"<p style='{BODY}'>{escape(label)} 조건이라면 <b>{escape(name)}</b>부터 확인해 보세요. "
                "아래 <b>📂 자세히 보기</b>에 공고별 상세 정보와 시세 그래프를 정리했어요. "
                f"도움이 되셨다면 저장해 두고 신청 전에 다시 확인해 보세요. 새 공고가 나오면 <b>{BLOG_NAME}</b>에서 계속 정리할게요. 🏠</p>")
-    return "".join(out)
+    return _airy("".join(out))
 
 
 def card_text_checks(top: dict, verdicts: dict) -> tuple[str, ...]:
@@ -955,6 +997,11 @@ if __name__ == "__main__":
         t = post_title({"label": "사회초년생"}, {"name": "당산역 더클래스 한강", "category": "오피스텔등",
                         "house_type": "오피스텔"}, "오피스텔 청약", 1, date(2026, 10, 12))
         assert t == "당산역 더클래스 한강 오피스텔 평수·분양가·자격, 넣을 수 있을까? (사회초년생 기준, 10/12)", t
+        airy = _airy(f"<p style='{BODY}'>첫 문장이에요. 둘째 문장이에요. 셋째 문장이에요.</p>")
+        assert airy.count("<p style") == 3 and airy.count(GAP) == 2, airy
+        assert _split("<b>가, 나</b>는 (다, 라) 마, 바", r",\s") == ["<b>가, 나</b>는 (다, 라) 마,", "바"]
+        long = "입주 때까지 대출을 분양가의 60% 받는다면 내 돈은 약 1.1억, 40%만 받는다면 약 1.7억이에요."
+        assert _lines(long) == ["입주 때까지 대출을 분양가의 60% 받는다면 내 돈은 약 1.1억,", "40%만 받는다면 약 1.7억이에요."]
         who = {"label": "은퇴 부부"}
         day = date(2026, 11, 4)
         priced = [{"price": 300_000_000}, {"price": 500_000_000}, {"price": 400_000_000}]

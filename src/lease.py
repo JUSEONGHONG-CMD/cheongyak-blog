@@ -683,7 +683,7 @@ def html_section(leases: list[dict], today: date) -> str:
 
     # 블로그는 표 대신 공고별 문단. 네이버 에디터에 붙이면 5칸 표의 너비가 깨진다
     rows = "".join(
-        f"<p style='margin:16px 0 2px;font-size:14px'><b>{escape(x['kind'])}</b> · "
+        f"<p>&nbsp;</p><p style='margin:0 0 2px;font-size:14px'><b>{escape(x['kind'])}</b> · "
         f"<a href='{escape(x['url'])}' style='color:#06c;text-decoration:none'>{escape(x['name'])}</a></p>"
         f"<p style='margin:0;{small}'>{escape(x['region'])}"
         f"{' · %d호' % x['houses'] if x.get('houses') else ''} · 마감 {x['deadline']:%m.%d}"
