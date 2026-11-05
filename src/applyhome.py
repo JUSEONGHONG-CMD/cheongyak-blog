@@ -172,6 +172,7 @@ def normalize(row: dict, category: str) -> dict:
         # PBLANC_URL 은 청약홈 공고 상세 링크다. HMPG_ADRES 는 분양 홍보 사이트라
         # 공고 내용이 없는 경우가 많으므로 뒤로 미룬다.
         "url": _pick(row, "PBLANC_URL", "HMPG_ADRES", default=""),
+        "homepage": row.get("HMPG_ADRES") or "",
         "phone": _pick(row, "MDHS_TELNO", default=""),
         "regulated": _pick(row, "MDAT_TRGET_AREA_SECD", default="N"),
         "speculation_zone": _pick(row, "SPECLT_RDN_EARTH_AT", default="N"),

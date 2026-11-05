@@ -177,13 +177,14 @@ def card_png(model_no: int, label: str, date_line: str, checks: list[str], stamp
     return buf.getvalue()
 
 
-def info_card(title: str, rows: list[tuple[str, str]]) -> bytes | None:
-    """본문 정보 카드(일정·평수·분양가). 왼쪽 항목, 오른쪽 값. 글꼴이 없으면 None."""
+def info_card(title: str, rows: list[tuple[str, str]], split: float = 0.36, size: int = 24) -> bytes | None:
+    """본문 정보 카드(일정·평수·분양가). 왼쪽 항목, 오른쪽 값. split 은 항목 칸 오른쪽 끝. 글꼴이 없으면 None."""
     font = korean_font()
     if not font or not rows:
         return None
     heavy = _heavy_font(font)
-    height = 1.5 + 0.9 * len(rows)  # 인치. 줄 수만큼 세로로 늘인다
+    step = 0.9 if len(rows) <= 5 else 0.72  # 줄이 많으면 촘촘하게
+    height = 1.5 + step * len(rows)  # 인치. 줄 수만큼 세로로 늘인다
     fig = Figure(figsize=(7.2, height), dpi=150)
     FigureCanvasAgg(fig)
     fig.patch.set_facecolor("white")
@@ -205,11 +206,11 @@ def info_card(title: str, rows: list[tuple[str, str]]) -> bytes | None:
     ax.add_patch(Rectangle((0, height - 1.1), 1, 1.1, facecolor=BLUE, edgecolor="none"))
     write(0.05, height - 0.55, title, 30, "white", family=heavy)
     for i, (label, value) in enumerate(rows):
-        y = height - 1.1 - 0.45 - 0.9 * i
-        write(0.05, y, label, 21, "#5a6270", right=0.36)
-        write(0.95, y, value, 24, INK, ha="right", left=0.38)
+        y = height - 1.1 - step / 2 - step * i
+        write(0.05, y, label, size - 3, "#5a6270", right=split)
+        write(0.95, y, value, size, INK, ha="right", left=split + 0.02)
         if i < len(rows) - 1:
-            ax.plot([0.05, 0.95], [y - 0.45, y - 0.45], color="#e3e6eb", linewidth=1.5)
+            ax.plot([0.05, 0.95], [y - step / 2, y - step / 2], color="#e3e6eb", linewidth=1.5)
     ax.add_patch(Rectangle((0, 0), 1, 0.4, facecolor=INK, edgecolor="none"))
     write(0.95, 0.2, "부동산&청약 공부 기록장", 13, "white", ha="right")
 

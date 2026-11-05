@@ -570,7 +570,7 @@ def build_post(blog: dict, sale_show, verdicts, degraded, lease_show, rest, intr
         html = html.replace(f"🏠 오늘의 청약 · {today:%Y년 %m월 %d일}", "🏠 분양 (청약홈)")
         out.append(body_of(html).replace(notify_email.CHECKS_MARK, ""))
     if lease_show:
-        out.append(lease.html_section(lease_show, today))
+        out.append(lease.html_section(lease_show, today, images, notify_email.CARD_MAX - min(len(sale_show), notify_email.CARD_MAX)))
     if rest:
         out.append("<h3 style='margin:24px 0 6px'>📋 계속 접수 중인 공고</h3><ul style='font-size:14px'>"
                    + "".join(one_liner(x, today) for x in rest) + "</ul>")

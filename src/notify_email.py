@@ -19,50 +19,18 @@ from html import escape
 from matplotlib.figure import Figure
 from matplotlib.ticker import FuncFormatter, MaxNLocator
 
-from . import detail, strategy
+from . import detail, strategy, thumbnail
 
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 465
 TIMEOUT = 30
 
 # 메일 클라이언트마다 CSS 지원이 제각각이라 스타일은 태그에 직접 넣는다.
-TD = "padding:6px 10px;border-bottom:1px solid #eee;font-size:13px"
-TH = "padding:6px 10px;border-bottom:2px solid #ccc;font-size:12px;text-align:left;color:#555"
 
 LINE_COLOR = "#8ba3bd"     # 시세 추이 선
 LINE_RECENT = "#2f5f8f"    # 가장 최근 시세 점
 CHEAP = "#0a7"             # 분양가가 시세보다 쌀 때
 PRICEY = "#c33"            # 비쌀 때
-
-
-def _dday(item: dict) -> str:
-    left = item.get("days_left")
-    if left is None:
-        return "미정"
-    if left < 0:
-        return "마감"
-    return "오늘 마감" if left == 0 else f"D-{left}"
-
-
-def _market_cell(item: dict) -> str:
-    """시세 대비 분양가. 싼 쪽을 초록, 비싼 쪽을 빨강으로 물들인다."""
-    m = item.get("market")
-    if not m or "gap_pct" not in m:
-        return "-"
-    pct = m["gap_pct"]
-    if pct < 0:
-        cell = f"<span style='color:{CHEAP}'>{abs(pct):.0f}% 쌈</span>"
-    else:
-        cell = f"<span style='color:{PRICEY}'>{pct:.0f}% 비쌈</span>"
-    # 지금 싼지만이 아니라 주변 시세가 오르는 중인지도 함께 봐야 판단이 선다
-    if "change_pct" in m:
-        change = m["change_pct"]
-        arrow = "↗" if change > 0.5 else ("↘" if change < -0.5 else "→")
-        cell += (
-            f"<br><span style='color:#888;font-size:11px'>"
-            f"시세 1년 {change:+.0f}% {arrow}</span>"
-        )
-    return cell
 
 
 def _month_label(ym: str) -> str:
@@ -176,14 +144,6 @@ def short_route(name: str) -> str:
     return name.split(" (")[0].replace("특별공급", "특공").replace("일반공급 추첨제", "일반공급")
 
 
-def _routes_cell(verdict) -> str:
-    routes = verdict.possible + verdict.conditional
-    if not routes:
-        return "-"
-    names = dict.fromkeys(("" if r.status == "가능" else "❔") + short_route(r.name) for r in routes)
-    return "<br>".join(escape(n) for n in names)
-
-
 CHECKS_MARK = "<!--checks-->"
 
 BUTTON = (
@@ -209,48 +169,62 @@ def link_bar(item: dict, today) -> str:
             f"<a href='{escape(apply_url)}' style='{BUTTON};background:#06c;color:#fff'>"
             f"✍️ 청약 신청하기{where}{note}</a>"
         )
+    home = str(item.get("homepage") or "").strip()
+    if home.startswith("http") and "lh.or.kr" not in home:  # 평면도는 저작물이라 싣지 않고 공식 사이트로 보낸다
+        links.append(f"<a href='{escape(home)}' style='{BUTTON};border:1px solid #ccc;color:#333'>📐 평면도 보기 (분양 홈페이지)</a>")
     return f"<div>{''.join(links)}</div>" if links else ""
 
 
-SECTION = re.compile(r"^([①-⑳])\s*(.+?)(?:\s{2,}(.*))?$")
+CARD_MAX = 3  # 자세히 보기에서 카드로 만드는 공고 수. 나머지는 한 줄 요약
+CHART_MAX = 2  # 시세 그래프를 붙이는 공고 수. 사진이 10장을 넘지 않게 묶는다
 
 
-def detail_table(lines: list[str], extra: dict[str, str] | None = None) -> str:
-    """상세 문구를 항목·내용 두 칸짜리 표로 바꾼다.
+def _short(item: dict, limit: int = 14) -> str:
+    return thumbnail.short_name(re.sub(r"\s*\([^)]*\)", "", str(item.get("name") or "")), limit)
 
-    내용은 카카오톡과 같은 detail.body 문구를 그대로 쓴다. 매체마다 문구를
-    따로 만들면 한쪽만 고쳐져 내용이 갈라진다. 번호(①~⑪)로 시작하는 줄이
-    항목이고, 그 아래 들여쓴 줄은 같은 항목의 내용이다. 더 깊이 들여쓴 줄은
-    보충 설명이라 한 단 들여 흐리게 보인다.
 
-    extra 는 항목 이름 → 그 칸 끝에 덧붙일 HTML (예: 시세 칸의 그래프).
-    """
-    extra = extra or {}
-    sections: list[tuple[str, list[tuple[int, str]]]] = []
-    for line in lines:
-        match = SECTION.match(line)
-        if match:
-            content = [(0, match.group(3))] if match.group(3) else []
-            sections.append((match.group(2).strip(), content))
-        elif sections and line.strip():
-            indent = len(line) - len(line.lstrip(" "))
-            sections[-1][1].append((indent, line.strip()))
+def _route_names(verdict) -> list[str]:
+    return list(dict.fromkeys(short_route(r.name) for r in (verdict.possible if verdict else [])))
 
+
+def overview_rows(items: list[dict], verdicts: dict, key_of) -> list[tuple[str, str]]:
+    """한눈에 보기 카드: 단지 | 마감 · 분양가 · 전형."""
     rows = []
-    for label, content in sections:
-        # 항목마다 들여쓰기 기준이 달라(4칸·8칸) 그 항목에서 가장 얕은 줄을 기준으로 삼는다
-        base = min((indent for indent, _ in content if indent), default=0)
-        parts = []
-        for indent, text in content:
-            sub = indent > base and indent != 0
-            style = "margin:0 0 0 14px;color:#666;font-size:12px" if sub else "margin:0;font-size:14px"
-            parts.append(f"<p style='{style}'>{escape(text)}</p>")
-        rows.append(
-            f"<p>&nbsp;</p><p style='margin:0 0 2px;font-size:14px'><b>▪ {escape(label)}</b></p>"
-            f"{''.join(parts)}{extra.get(label, '')}"
-        )
-    # 블로그는 표 대신 문단으로 쓴다. 네이버 에디터가 붙여넣은 2칸 표의 너비를 제멋대로 다시 잡는다
-    return "<div>" + "".join(rows) + "</div>"
+    for item in items:
+        left = item.get("days_left")
+        routes = _route_names(verdicts.get(key_of(item)))
+        facts = (f"D-{left}" if left is not None else "", detail.price_span(item), routes[0] if routes else "공고문 확인")
+        rows.append((_short(item), " · ".join(x for x in facts if x)))
+    return rows
+
+
+def detail_rows(item: dict, verdict) -> list[tuple[str, str]]:
+    """공고 카드. 값이 없는 줄은 뺀다."""
+    ends = [d for d in (item.get("special_end"), item.get("general_end")) if d]
+    subway = item.get("subway")
+    market = item.get("market") or {}
+    resale = next((x.strip().replace("⚖️ ", "") for x in detail.regulation_lines(item) if "전매제한" in x), "")
+    routes = _route_names(verdict)
+    rows = [
+        ("위치", " ".join(detail.location(item).split()[:3])),
+        ("교통", f"{subway['name']} 도보 {subway['walk_min']}분" if subway else ""),
+        ("마감", f"{max(ends).month}월 {max(ends).day}일" if ends else ""),
+        ("입주", detail.fmt_move_in(item.get("move_in")) if item.get("move_in") else ""),
+        ("평수", detail.areas_text(item)),
+        ("분양가", detail.price_span(item)),
+        ("시세", f"주변보다 약 {abs(market['gap_pct']):.0f}% {'저렴' if market['gap_pct'] < 0 else '비쌈'}"
+         if market.get("gap_pct") is not None else ""),
+        ("전매", re.sub(r"\(~[^)]*\)|\(발표일부터\)", "", resale)),
+        ("전형", " · ".join(routes[:3]) or "공고문 확인 필요"),
+    ]
+    return [row for row in rows if row[1]]
+
+
+def _card_img(images: dict, cid: str, png: bytes | None, alt: str) -> str:
+    if not png:
+        return ""
+    images[cid] = png
+    return f"<p><img src='cid:{cid}' width='540' alt='{escape(alt)}'></p>"
 
 
 def build_html(
@@ -291,46 +265,28 @@ def build_html(
         out.append("<p>조건에 맞는 공고가 없습니다.</p></body></html>")
         return "".join(out)
 
-    # ── 한눈에 보는 표 ─────────────────────────────
-    # 네이버 에디터는 붙여 넣을 때 CSS 너비를 버리고 width 속성은 지킨다. 열 너비를 속성으로 고정한다
-    out.append("<table width='100%' style='border-collapse:collapse;width:100%;margin-bottom:24px'><tr>")
-    for head, width in (("#", 5), ("단지", 33), ("마감", 10), ("분양가", 15), ("시세 대비", 15), ("신청 가능", 22)):
-        out.append(f"<th width='{width}%' style='{TH}'>{head}</th>")
-    out.append("</tr>")
-
-    for item in items:
-        verdict = verdicts.get(key_of(item))
-        flag = "🔴" if item.get("urgent") else ("🆕" if item.get("is_new") else "")
-        url = escape((item.get("url") or "").strip())
-        name = escape(str(item.get("name", "")))
-        out.append(
-            f"<tr>"
-            f"<td style='{TD}'>{flag}{item.get('rank', '')}</td>"
-            f"<td style='{TD}'><a href='{url}' style='color:#06c;text-decoration:none'>{name}</a>"
-            f"<br><span style='color:#888;font-size:11px'>{escape(str(item.get('area_name') or ''))}"
-            f" · {escape(str(item.get('category')))}</span></td>"
-            f"<td style='{TD}'>{_dday(item)}</td>"
-            f"<td style='{TD}'>{detail.price_span(item) or '-'}</td>"
-            f"<td style='{TD}'>{_market_cell(item)}</td>"
-            f"<td style='{TD};font-size:12px'>{_routes_cell(verdict) if verdict else '-'}</td>"
-            f"</tr>"
-        )
-    out.append("</table>")
+    # ── 한눈에 보기 ────────────────────────────────
+    # 표는 붙여 넣으면 너비가 깨지고 휑해 보여 카드 사진으로 만든다. 단지명은 아래 공고 제목에 글로 남는다
+    if len(items) > 1:
+        out.append(_card_img(images, "card09@blog", thumbnail.info_card(
+            "이번 공고 한눈에 보기", overview_rows(items, verdicts, key_of), split=0.42, size=19), "이번 공고 한눈에 보기"))
 
     # ── 공고별 상세 ────────────────────────────────
-    for item in items:
+    for order, item in enumerate(items):
         verdict = verdicts.get(key_of(item))
         if not verdict:
             continue
         url = escape((item.get("url") or "").strip())
         out.append(
-            "<div style='margin:24px 0 16px'>"  # 테두리 상자는 붙여넣으면 1칸 표가 된다
-            f"<h3 style='margin:0 0 6px;font-size:15px'>"
+            "<div style='margin:20px 0 12px'>"  # 테두리 상자는 붙여넣으면 1칸 표가 된다
+            f"<h3 style='margin:0 0 6px;font-size:17px'>"
             f"<a href='{url}' style='color:#111;text-decoration:none'>"
             f"{escape(detail.title(item))}</a></h3>"
-            f"<p style='margin:4px 0 8px;font-size:14px;line-height:1.7'>{escape(detail.summary_sentence(item))}</p>"
+            f"<p style='margin:4px 0 8px;font-size:15px;line-height:1.7'>{escape(detail.summary_sentence(item))}</p>"
+            + (_card_img(images, f"card{10 + order}@blog", thumbnail.info_card(
+                _short(item, 16), detail_rows(item, verdict), split=0.2), f"{_short(item)} 정보") if order < CARD_MAX else "")
             + link_bar(item, today)
-            + detail_table(detail.body(item, verdict), {"시세": market_chart(item, images)})
+            + (market_chart(item, images) if order < CHART_MAX else "")
             + "</div>"
         )
 
