@@ -122,33 +122,21 @@ def short_route(name: str) -> str:
 
 CHECKS_MARK = "<!--checks-->"
 
-BUTTON = (
-    "display:inline-block;padding:5px 12px;margin:0 6px 10px 0;border-radius:4px;"
-    "font-size:12px;font-weight:600;text-decoration:none"
-)
-
-
 def link_bar(item: dict, today) -> str:
-    """공고 보기·청약 신청 버튼. 메일 앱이 CSS 를 지워도 링크는 남도록 a 태그로 만든다."""
+    """공고·신청·평면도 링크. 네이버에 붙이면 버튼 모양(여백·테두리)은 사라지고 배경색만 남아, 줄마다 글자 링크로 둔다."""
     links = []
     url = (item.get("url") or "").strip()
     if url:
-        links.append(
-            f"<a href='{escape(url)}' style='{BUTTON};border:1px solid #ccc;color:#333'>"
-            "📄 공고 보기</a>"
-        )
+        links.append((url, "📄 공고 보기"))
     apply_url, state = detail.apply_link(item, today)
     if apply_url and state != "마감":
         where = " (LH청약플러스)" if "lh.or.kr" in apply_url else ""
-        note = f" · {state}" if state else ""
-        links.append(
-            f"<a href='{escape(apply_url)}' style='{BUTTON};background:#06c;color:#fff'>"
-            f"✍️ 청약 신청하기{where}{note}</a>"
-        )
+        links.append((apply_url, f"✍️ 청약 신청하기{where}" + (f" · {state}" if state else "")))
     home = str(item.get("homepage") or "").strip()
     if home.startswith("http") and "lh.or.kr" not in home:  # 평면도는 공식 사이트에서 본다
-        links.append(f"<a href='{escape(home)}' style='{BUTTON};border:1px solid #ccc;color:#333'>📐 평면도 보러가기</a>")
-    return f"<div>{''.join(links)}</div>" if links else ""
+        links.append((home, "📐 평면도 보러가기"))
+    return "".join(f"<p style='margin:4px 0;font-size:15px'><a href='{escape(href)}' style='color:#06c;font-weight:bold'>"
+                   f"{escape(text)}</a></p>" for href, text in links)
 
 
 CARD_MAX = 3  # 자세히 보기에서 카드로 만드는 공고 수. 나머지는 한 줄 요약
