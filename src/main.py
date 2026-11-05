@@ -21,6 +21,7 @@ from pathlib import Path
 from . import (
     applyhome,
     builder,
+    competition,
     detail,
     eligibility,
     geo,
@@ -339,6 +340,20 @@ def _airy(html: str) -> str:
     return spaced.replace(GAP + HR, HR)  # 구분선 앞 빈 줄은 겹쳐 보인다
 
 
+def _result_line(r: dict) -> str:
+    """주변 단지 결과 한 줄: '• 단지 84A(2026년 9월 접수)는 1순위 해당지역 61.7대 1, 당첨 최저 가점 62점이에요.'"""
+    ended = r["ended"].split("-")
+    head = f"• <b>{escape(r['name'])}</b> {escape(_type(r['type']))}({ended[0]}년 {int(ended[1])}월 접수)"
+    if r["rate"] is not None:
+        text = f"{head}{validate.josa(_type(r['type']), '은')} 1순위 해당지역 <b>{r['rate']:.1f}대 1</b>"
+    else:
+        text = (f"{head}{validate.josa(_type(r['type']), '은')} 1순위 해당지역에서 <b>{r['short']}세대 미달</b>"
+                f"(공급 {r['supply']}세대)")
+    if r["low"]:
+        text += f", 당첨 최저 가점 <b>{r['low']}점</b>" + (f"·평균 {r['average']}점" if r["average"] else "")
+    return f"<p style='{BODY};margin:6px 0'>{text}이에요.</p>"
+
+
 def route_sure(verdict, route: str) -> bool:
     """제목·요약에 쓴 대표 경로가 '가능'인가. best_route 는 확인 필요(❔) 경로도 고를 수 있다."""
     return bool(verdict) and route in [notify_email.short_route(r.name) for r in verdict.possible]
@@ -478,6 +493,16 @@ def readable_html(profile: dict, sale_show, lease_show, verdicts, count: int, in
                        "소득·규제에 따라 은행에서 확인하세요. 발코니 확장·옵션비와 취득세는 빠진 금액이에요."
                        + (" 지분적립형은 남은 지분을 나눠 사는 방식이라 입주 뒤 추가 납입금이 있어요." if "지분적립" in str(top["name"]) else "")
                        + "</p>")
+
+    # 📊 주변 단지 결과. 이 단지는 접수 전이라 경쟁률이 없다
+    results = [] if is_lease else top.get("nearby_results") or []
+    if results:
+        out.append(HR + f"<p style='{HEAD}'>📊 주변 단지 경쟁률은 어땠을까?</p>")
+        out.append(f"<p style='{BODY}'>{escape(name)}{eun} 아직 접수 전이라, 같은 지역에서 최근 접수가 끝난 단지를 참고해 보세요.</p>")
+        out += [_result_line(r) for r in results]
+        out.append(f"<p style='{SMALL}'>※ 이 단지의 결과가 아니라 참고 자료예요. 같은 시·군·구에서 최근 1년 안에 접수한 단지 중 "
+                   f"평형이 가까운 주택형을 골랐어요. 접수 건수는 나중에 달라질 수 있어요. "
+                   f"(청약홈, {today.month}월 {today.day}일 조회)</p>")
 
     # 🔎 함께 볼 공고
     others = [x for x in (*sale_show, *lease_show) if x is not top]
@@ -831,6 +856,8 @@ def run_one(alias, profile, args, pool, owner, posted, today) -> str | None:
     issues = [*drop_suspect_numbers(sale_show),
               *validate.check_data(sale_show, verdicts, applyhome_key, today, profile.get("filters") or {}),
               *validate.check_leases(lease_show, today)]
+    if sale_show and not competition.enrich(sale_show[0], env("ODCLOUD_SERVICE_KEY"), today):
+        issues.append(validate.Issue(1, "경쟁률", "주변 단지 경쟁률을 못 가져와 그 칸 없이 나감"))
     images: dict[str, bytes] = {}
     count = len(sale_new) + len(lease_new)
     intro = readable_html(profile, sale_show, lease_show, verdicts, count,
@@ -952,6 +979,13 @@ def main() -> int:
 if __name__ == "__main__":
     if os.environ.get("SELFTEST"):
         geo.selfcheck()
+        competition.selfcheck()
+        line = _result_line({"name": "가나 단지", "ended": "2026-09-30", "type": "084.9115A", "rate": 61.69, "short": None,
+                             "supply": 91, "low": 62, "average": 66})
+        assert "84A(2026년 9월 접수)는 1순위 해당지역 <b>61.7대 1</b>, 당첨 최저 가점 <b>62점</b>·평균 66점이에요." in line, line
+        line = _result_line({"name": "가나 단지", "ended": "2026-09-30", "type": "059.9986A", "rate": None, "short": 176,
+                             "supply": 179, "low": None, "average": None})
+        assert "<b>176세대 미달</b>(공급 179세대)이에요." in line and "2026년 9월" in line, line
         notice_pdf.selfcheck()
         # 배정: 같은 공고는 특공 대상 인물에게, 이미 나간 공고는 아무에게도
         from .eligibility import Route, Verdict
