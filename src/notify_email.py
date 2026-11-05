@@ -170,8 +170,8 @@ def link_bar(item: dict, today) -> str:
             f"✍️ 청약 신청하기{where}{note}</a>"
         )
     home = str(item.get("homepage") or "").strip()
-    if home.startswith("http") and "lh.or.kr" not in home:  # 평면도를 직접 찾아 넣을 때 쓴다
-        links.append(f"<a href='{escape(home)}' style='{BUTTON};border:1px solid #ccc;color:#333'>📐 평면도 보기 (분양 홈페이지)</a>")
+    if home.startswith("http") and "lh.or.kr" not in home:  # 평면도는 공식 사이트에서 본다
+        links.append(f"<a href='{escape(home)}' style='{BUTTON};border:1px solid #ccc;color:#333'>📐 평면도 보러가기</a>")
     return f"<div>{''.join(links)}</div>" if links else ""
 
 
