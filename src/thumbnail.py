@@ -22,11 +22,13 @@ from __future__ import annotations
 
 import io
 
+import numpy as np
 from matplotlib import font_manager, patheffects
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from matplotlib.image import imread
 from matplotlib.patches import Circle, FancyBboxPatch, Rectangle, Wedge
+from PIL import Image
 
 FONTS = ("NanumGothic", "Malgun Gothic", "AppleGothic", "Noto Sans CJK KR")
 HEAVY = ("NanumGothic ExtraBold", "NanumSquare ExtraBold")  # 있으면 큰 제목에 쓴다
@@ -106,6 +108,92 @@ def short_name(name: str, limit: int = 16) -> str:
     return kept or name[: limit - 1] + "…"
 
 
+def _writer(fig, ax, font: str):
+    """칸을 넘으면 넘지 않을 때까지 글자를 줄여 쓰는 함수."""
+    renderer = fig.canvas.get_renderer()
+
+    def write(x, y, text, size, color, weight="bold", family=None, ha="left", limit=0.95, thick=0, shadow=False, **kw):
+        t = ax.text(x, y, text, color=color, fontsize=size, fontfamily=family or font, ha=ha, va="center",
+                    fontweight=weight, zorder=10, **kw)
+        effects = [patheffects.withStroke(linewidth=6, foreground="#0b1020")] if shadow else []
+        if thick:  # 굵은 글꼴이 없을 때 같은 색 외곽선으로 시안의 두꺼운 제목에 가깝게 한다
+            effects.append(patheffects.withStroke(linewidth=thick, foreground=color))
+        if effects:
+            t.set_path_effects(effects)
+        # 단지명·조건은 길이가 제각각이라, 정해진 폭을 넘으면 넘지 않을 때까지 줄인다
+        while size > 9 and t.get_window_extent(renderer).x1 > limit * fig.bbox.width:
+            size -= 1
+            t.set_fontsize(size)
+        return t
+    return write
+
+
+def _top_band(ax, write, model_no, label, date_line, icons, senior) -> None:
+    """파란 띠: 인물 아이콘 · 모델 번호 · 인물 이름 · 기준일."""
+    ax.add_patch(Rectangle((0, 0.82), 1, 0.18, facecolor=BLUE, edgecolor="none"))
+    left = _people(ax, list(icons), senior) + 0.01
+    write(left, 0.945, f"모델 {model_no:02d}", 14, BLUE_SOFT, weight="normal")
+    write(left, 0.885, label, 25, "white", limit=0.72)
+    write(0.95, 0.945, date_line, 13, BLUE_SOFT, weight="normal", ha="right")
+
+
+def _bottom_band(ax, write, facts, dday, heavy, bold) -> None:
+    """검은 띠: 유형·평수·분양가 · D-day."""
+    ax.add_patch(Rectangle((0, 0), 1, 0.095, facecolor=INK, edgecolor="none"))
+    write(0.05, 0.0475, facts, 21, "white", limit=0.76)
+    write(0.95, 0.0475, dday, 27, YELLOW, weight="heavy", family=heavy, ha="right", thick=bold)
+
+
+def _fill(picture: Image.Image, ratio: float) -> np.ndarray:
+    """가로세로 비율 ratio 로 가운데를 잘라낸다."""
+    width, height = picture.size
+    if width / height > ratio:
+        keep = int(height * ratio)
+        picture = picture.crop(((width - keep) // 2, 0, (width + keep) // 2, height))
+    else:
+        keep = int(width / ratio)
+        picture = picture.crop((0, (height - keep) // 2, width, (height + keep) // 2))
+    return np.asarray(picture.convert("RGB"))
+
+
+def photo_card(photo: bytes, credit: str, model_no: int, label: str, date_line: str, checks: list[str], stamp: str,
+               name: str, dday: str, icons: list[str] = ("man",), senior: bool = False,
+               verb: str = "지원할 수 있어요", facts: str = "") -> bytes | None:
+    """사진·지도를 깐 1080×1080 카드. 인자는 card_png 와 같고 photo·credit 만 더 받는다. 글꼴이 없으면 None."""
+    font = korean_font()
+    if not font:
+        return None
+    heavy = _heavy_font(font)
+    bold = 0 if heavy != font else 1.2
+    fig = Figure(figsize=(7.2, 7.2), dpi=150)
+    FigureCanvasAgg(fig)
+    ax = fig.add_axes((0, 0, 1, 1))
+    ax.set_axis_off()
+    area = (0, 1, 0.095, 0.82)
+    ax.imshow(_fill(Image.open(io.BytesIO(photo)), 1 / 0.725), extent=area, aspect="auto", zorder=0)
+    shade = np.zeros((200, 2, 4))  # 위쪽 사진은 그대로 두고 글자가 놓이는 아래쪽만 어둡게
+    shade[..., :3] = (0.04, 0.06, 0.12)
+    shade[:, :, 3] = np.concatenate([np.zeros(80), np.linspace(0, .86, 120)])[:, None]
+    ax.imshow(shade, extent=area, aspect="auto", zorder=0.5)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    write = _writer(fig, ax, font)
+    _top_band(ax, write, model_no, label, date_line, icons, senior)
+    write(0.05, 0.345, short_name(name), 50, "white", weight="heavy", family=heavy, thick=bold, limit=0.93, shadow=True)
+    write(0.05, 0.225, verb, 50, "white", weight="heavy", family=heavy, thick=bold, shadow=True)
+    write(0.05, 0.13, " · ".join(checks[:2]), 19, "white", limit=0.93, shadow=True)
+    write(0.95, 0.785, credit, 11, "white", weight="normal", ha="right", shadow=True)
+    cx, cy, radius = 0.82, 0.60, 0.095
+    ax.add_patch(Circle((cx, cy), radius, facecolor="white", alpha=0.92, edgecolor=RED, linewidth=6, zorder=7))
+    ax.add_patch(Circle((cx, cy), radius * 0.77, facecolor="none", edgecolor=RED, linewidth=2, zorder=8))
+    ax.text(cx, cy, stamp.replace(" ", "\n", 1), color=RED, fontsize=22, fontfamily=heavy, fontweight="heavy", ha="center",
+            va="center", rotation=12, linespacing=1.1, zorder=9)
+    _bottom_band(ax, write, facts or name, dday, heavy, bold)
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png")
+    return buf.getvalue()
+
+
 def card_png(model_no: int, label: str, date_line: str, checks: list[str], stamp: str,
              name: str, dday: str, icons: list[str] = ("man",), senior: bool = False,
              verb: str = "지원할 수 있어요", facts: str = "") -> bytes | None:
@@ -123,25 +211,8 @@ def card_png(model_no: int, label: str, date_line: str, checks: list[str], stamp
     ax.set_axis_off()
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
-    renderer = fig.canvas.get_renderer()
-
-    def write(x, y, text, size, color, weight="bold", family=None, ha="left", limit=0.95, thick=0, **kw):
-        t = ax.text(x, y, text, color=color, fontsize=size, fontfamily=family or font, ha=ha, va="center",
-                    fontweight=weight, zorder=10, **kw)
-        if thick:  # 굵은 글꼴이 없을 때 같은 색 외곽선으로 시안의 두꺼운 제목에 가깝게 한다
-            t.set_path_effects([patheffects.withStroke(linewidth=thick, foreground=color)])
-        # 단지명·조건은 길이가 제각각이라, 정해진 폭을 넘으면 넘지 않을 때까지 줄인다
-        while size > 9 and t.get_window_extent(renderer).x1 > limit * fig.bbox.width:
-            size -= 1
-            t.set_fontsize(size)
-        return t
-
-    # 파란 띠: 인물 아이콘 · 모델 번호 · 인물 이름 · 기준일
-    ax.add_patch(Rectangle((0, 0.82), 1, 0.18, facecolor=BLUE, edgecolor="none"))
-    left = _people(ax, list(icons), senior) + 0.01
-    write(left, 0.945, f"모델 {model_no:02d}", 14, BLUE_SOFT, weight="normal")
-    write(left, 0.885, label, 25, "white", limit=0.72)
-    write(0.95, 0.945, date_line, 13, BLUE_SOFT, weight="normal", ha="right")
+    write = _writer(fig, ax, font)
+    _top_band(ax, write, model_no, label, date_line, icons, senior)
 
     # 큰 제목
     bold = 0 if heavy != font else 3
@@ -168,10 +239,7 @@ def card_png(model_no: int, label: str, date_line: str, checks: list[str], stamp
             va="center", rotation=12, linespacing=1.1, zorder=8,
             path_effects=[patheffects.withStroke(linewidth=bold * 0.4, foreground=RED)] if bold else None)
 
-    # 검은 띠: 단지명 · D-day
-    ax.add_patch(Rectangle((0, 0), 1, 0.095, facecolor=INK, edgecolor="none"))
-    write(0.05, 0.0475, facts or name, 21, "white", limit=0.76)
-    write(0.95, 0.0475, dday, 27, YELLOW, weight="heavy", family=heavy, ha="right", thick=bold)
+    _bottom_band(ax, write, facts or name, dday, heavy, bold)
 
     buf = io.BytesIO()
     fig.savefig(buf, format="png")
@@ -242,4 +310,8 @@ if __name__ == "__main__":
                    "의왕역 한신더휴", "D-6", icons=["woman", "man", "girl", "boy"],
                    facts="무순위 · 전용 84㎡(26평) · 9.4억")
     assert png is None or png[:4] == b"\x89PNG"
+    back = io.BytesIO()
+    Image.new("RGB", (800, 600), (70, 120, 170)).save(back, format="PNG")
+    photo = photo_card(back.getvalue(), "일러스트", 3, "맞벌이 신혼부부", "10월 12일 기준", ["무주택"], "신청 가능", "의왕역 한신더휴", "D-6")
+    assert photo is None or photo[:4] == b"\x89PNG"
     print("ok" if png else "ok (한글 글꼴 없음 → 썸네일 생략)")

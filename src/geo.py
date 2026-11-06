@@ -31,6 +31,7 @@ AMENITIES = {
     "대형마트": ("🛒", {"category_group_code": "MT1"}, r"> 대형마트.*\|.*(마트|홈플러스|코스트코|트레이더스|클럽|하나로|마켓)"),
     "공원": ("🌳", {"query": "공원"}, r"> 공원(\s|$)"),
     "초등학교": ("🏫", {"query": "초등학교", "category_group_code": "SC4"}, r"> 초등학교"),
+    "병원": ("🏥", {"category_group_code": "HP8"}, r"> 병원"),
 }
 NEARBY_RADIUS = 3000
 
@@ -210,7 +211,7 @@ def nearest_subway(
 
 def nearest_place(lat: float, lon: float, label: str, rest_key: str, cache: GeoCache | None = None) -> dict | None:
     """반경 3km 안 가장 가까운 편의시설(AMENITIES 의 label)과 도보 거리. 없으면 None."""
-    key = f"near:{label}:{lat:.5f},{lon:.5f}"
+    key = f"near2:{label}:{lat:.5f},{lon:.5f}"  # near: 는 좌표가 없던 예전 저장값
     if cache and (hit := cache.get(key)) is not None:
         return hit or None
     _, params, pattern = AMENITIES[label]
@@ -231,7 +232,8 @@ def nearest_place(lat: float, lon: float, label: str, rest_key: str, cache: GeoC
         print(f"[경고] {label} 검색 네트워크 오류: {exc}", file=sys.stderr)
         return None
     doc = next((d for d in documents if re.search(pattern, f"{d.get('category_name')}|{d.get('place_name')}")), None)
-    result = {"name": doc["place_name"], "walk_m": round(float(doc["distance"]) * DETOUR_FACTOR)} if doc else {}
+    result = {"name": doc["place_name"], "walk_m": round(float(doc["distance"]) * DETOUR_FACTOR),
+              "lat": float(doc["y"]), "lon": float(doc["x"])} if doc else {}
     if cache:
         cache.set(key, result)  # '3km 안에 없음'도 저장한다 (오류는 저장하지 않음)
     return result or None

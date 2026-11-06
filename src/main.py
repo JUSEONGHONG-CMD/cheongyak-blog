@@ -18,8 +18,11 @@ from datetime import date
 from html import escape
 from pathlib import Path
 
+from matplotlib import font_manager
+
 from . import (
     applyhome,
+    backdrop,
     builder,
     competition,
     detail,
@@ -28,6 +31,7 @@ from . import (
     geo,
     lease,
     market,
+    nearmap,
     notice_pdf,
     notify_email,
     presale,
@@ -372,6 +376,25 @@ def _plan_html(item: dict, name: str) -> str:
     return "".join(out)
 
 
+def _around_html(name: str, around: dict | None) -> str:
+    """주변 시설 칸: 지도 + 번호 목록. 지도의 번호와 목록의 번호가 같다."""
+    if not around:
+        return ""
+    places = around["places"]
+    out = [HR + f"<p style='{HEAD}'>🗺 {escape(name)} 주변에는 뭐가 있을까?</p>"]
+    if around.get("cid"):
+        out.append(f"<p><img src='cid:{around['cid']}' width='540' alt='{escape(name)} 주변 지도'></p>")
+    if places:
+        said = ", ".join(f"{p['name']}({p['how_far']})" for p in places[:2])
+        out.append(f"<p style='{BODY}'>{escape(name)} 가까이에는 {escape(said)} 등이 있어요.</p>")
+        out += [f"<p style='{BODY};margin:4px 0'>{nearmap.NUMBERS[i]} {escape(p['kind'])}: <b>{escape(p['name'])}</b> "
+                f"{escape(p['how_far'])}</p>" for i, p in enumerate(places)]
+    out.append(f"<p style='{SMALL}'>※ 빨간 핀이 단지 위치예요. 거리는 직선거리로 추정한 값이라 실제와 다를 수 있어요."
+               + (" 공고 주소로 찾은 대략적인 위치예요." if around.get("rough") else "")
+               + f" {nearmap.ATTRIBUTION} · 장소 정보: 카카오</p>")
+    return "".join(out)
+
+
 def _result_line(r: dict) -> str:
     """주변 단지 결과 한 줄: '• 단지 84A(2026년 9월 접수)는 1순위 해당지역 61.7대 1, 당첨 최저 가점 62점이에요.'"""
     ended = r["ended"].split("-")
@@ -397,7 +420,8 @@ def cash_models(item: dict) -> list[dict]:
     return priced[:1] + priced[-1:] if len(priced) > 1 else priced
 
 
-def readable_html(profile: dict, sale_show, lease_show, verdicts, count: int, intro: str, today: date) -> str:
+def readable_html(profile: dict, sale_show, lease_show, verdicts, count: int, intro: str, today: date,
+                  around: dict | None = None) -> str:
     """원고 앞쪽 읽기용 본문. 대표 공고 하나를 중심으로 질문형 섹션을 만든다."""
     blog = profile["blog"]
     label = blog["label"]
@@ -510,6 +534,8 @@ def readable_html(profile: dict, sale_show, lease_show, verdicts, count: int, in
                        "소득·규제에 따라 은행에서 확인하세요. 발코니 확장·옵션비와 취득세는 빠진 금액이에요."
                        + (" 지분적립형은 남은 지분을 나눠 사는 방식이라 입주 뒤 추가 납입금이 있어요." if "지분적립" in str(top["name"]) else "")
                        + "</p>")
+
+    out.append(_around_html(name, around))
 
     # 📊 주변 단지 결과. 이 단지는 접수 전이라 경쟁률이 없다
     results = [] if is_lease else top.get("nearby_results") or []
@@ -747,6 +773,8 @@ def place_images(post: str, images: dict[str, bytes], folder: Path, base_url: st
             name, slug = "썸네일", "thumb"
         elif cid.startswith("plan"):
             name, slug = "평면도", "plan"
+        elif cid.startswith("map"):
+            name, slug = "주변지도", "map"
         else:
             name, slug = "정보카드", "card"
         public_name = f"{number:02d}_{slug}.png"  # 주소에는 한글을 쓰지 않는다
@@ -756,7 +784,7 @@ def place_images(post: str, images: dict[str, bytes], folder: Path, base_url: st
     return post, files
 
 
-def build_mail(blog: dict, title: str, tags: list[str], issues: list, post: str) -> str:
+def build_mail(blog: dict, title: str, tags: list[str], issues: list, post: str, spare_card: bool = False) -> str:
     """운영자용 메일: 위에는 발행 정보, 구분선 아래는 그대로 복사할 본문."""
     notes = "<br>".join(escape(str(i)) for i in issues) or "없음"
     row = "<tr><td style='padding:4px 10px;color:#666'>{}</td><td style='padding:4px 10px'>{}</td></tr>"
@@ -770,6 +798,7 @@ def build_mail(blog: dict, title: str, tags: list[str], issues: list, post: str)
         + row.format("제목", f"<b style='white-space:nowrap'>{escape(title)}</b>")
         + row.format("태그 (입력란에 붙여넣기)", f"<b>{escape(', '.join(tags))}</b>")
         + row.format("예약 발행", escape(blog.get("publish_time") or "-"))
+        + (row.format("썸네일", "<b>조감도가 건물이 아니거나 글자에 가리면</b> 첨부 <b>01_썸네일_지도판</b>으로 바꾸세요.") if spare_card else "")
         + row.format("사진", "본문을 그대로 복사하면 썸네일·그래프가 사진으로 함께 들어갑니다(공개 주소 이미지). "
                      "빠진 사진만 첨부 <b>01_썸네일 · 02_…</b>로 넣으세요.")
         + (row.format("검증 메모", notes) if not issues else
@@ -838,7 +867,33 @@ def assign(pools: dict[str, dict], profiles: dict[str, dict], posted: dict) -> d
     return {key: min(options)[-1] for key, options in candidates.items()}
 
 
-def run_one(alias, profile, args, pool, owner, posted, today) -> str | None:
+def make_around(top: dict, service_key: str, kakao_key: str, cache, images: dict) -> tuple[dict | None, tuple | None]:
+    """대표 공고의 (본문 주변 칸 자료, 좌표). 좌표를 못 찾으면 (None, None)."""
+    spot = nearmap.locate(top, kakao_key, cache)
+    if not spot:
+        return None, None
+    places = nearmap.nearby(*spot, kakao_key, cache) if kakao_key else []
+    font = font_manager.findfont(thumbnail.korean_font() or "DejaVu Sans")
+    picture = nearmap.body_map(*spot, places, font)
+    if picture:
+        images["map0@blog"] = picture
+    if not picture and not places:
+        return None, spot
+    return {"cid": "map0@blog" if picture else "", "places": places, "rough": top.get("coords_approximate")}, spot
+
+
+def make_cards(card: dict, top: dict, spot, service_key: str) -> tuple[bytes | None, bytes | None]:
+    """(썸네일, 지도판 예비 썸네일). 조감도 → 주변 지도 → 글자 카드 순으로 쓴다."""
+    aerial = backdrop.find(top, service_key)
+    print(f"      썸네일 배경: {aerial[1] if aerial else '주변 지도' if spot else '글자 카드'}")
+    area = nearmap.thumbnail_map(*spot) if spot else None
+    by_map = thumbnail.photo_card(area, nearmap.ATTRIBUTION, **card) if area else None
+    if aerial:
+        return thumbnail.photo_card(aerial[0], aerial[1], **card), by_map
+    return by_map or thumbnail.card_png(**card), None
+
+
+def run_one(alias, profile, args, pool, owner, posted, today, cache=None) -> str | None:
     """한 인물. 'sent'(미리보기는 만들었음) · 'skip'(새 공고 없음) · None(실패).
 
     pool 은 gather 결과, owner 는 assign 결과(공고 키 → 그 공고를 쓸 인물), posted 는 이미 나간 공고 키 → {인물: 처음 쓴 날}.
@@ -877,20 +932,22 @@ def run_one(alias, profile, args, pool, owner, posted, today) -> str | None:
     if sale_show:
         floorplan.enrich(sale_show[0], env("ODCLOUD_SERVICE_KEY"), images)
     count = len(sale_new) + len(lease_new)
+    top = (sale_show or lease_show)[0]
+    service_key, kakao_key = env("ODCLOUD_SERVICE_KEY"), env("KAKAO_REST_API_KEY", required=False) or ""
+    around, spot = make_around(top, service_key, kakao_key, cache, images)
     intro = readable_html(profile, sale_show, lease_show, verdicts, count,
-                          intro_html(alias, blog, sale_show, lease_show, verdicts, count, today, short=True), today)
+                          intro_html(alias, blog, sale_show, lease_show, verdicts, count, today, short=True), today, around)
     if args.take:  # 이미 나온 공고를 쓰는 글이라 '새로'가 맞지 않는다
         for old, new in (("이번에 새로 열린 공고", "신청할 수 있는 공고"), ("새로 넣을 수 있는 공고", "넣을 수 있는 공고"),
                          ("눈여겨볼 새 공고", "눈여겨볼 공고"), ("새로 접수 중", "접수 중")):
             intro = intro.replace(old, new)
     post = build_post(blog, sale_show, verdicts, degraded, lease_show, rest, intro, today, images)
-    card = thumbnail.card_png(**card_text(alias, profile, sale_show, lease_show, verdicts, today))
+    card, spare_card = make_cards(card_text(alias, profile, sale_show, lease_show, verdicts, today), top, spot, service_key)
     if card:  # 네이버는 첫 이미지를 검색 썸네일로 쓴다
         images["thumb@blog"] = card
         post = "<p><img src='cid:thumb@blog' width='540' alt='대표 이미지'></p>" + post
     issues += validate.check_output(sale_show, post, images)
 
-    top = (sale_show or lease_show)[0]
     route = best_route(verdicts.get(applyhome_key(top))) if sale_show else top["kind"].split("(")[0]
     title = post_title(blog, top, route, count, today)
     issues += [validate.Issue(2, "제목", p) for p in validate.check_title(title)]
@@ -904,7 +961,9 @@ def run_one(alias, profile, args, pool, owner, posted, today) -> str | None:
         sub = f"{today:%Y-%m-%d}/{alias}"
         post, files = place_images(post, images, PUBLIC_DIR / sub,
                                    f"{env('IMAGE_BASE_URL', required=False) or IMAGE_BASE_URL}/{sub}")
-    mail = build_mail(blog, title, tags, issues, post)
+    if spare_card:  # 조감도가 틀렸을 때 바꿔 쓸 지도판
+        files.insert(1, ("01_썸네일_지도판.png", spare_card, "image/png"))
+    mail = build_mail(blog, title, tags, issues, post, bool(spare_card))
 
     if args.preview:
         path = Path(args.preview) / f"{alias}.html"
@@ -972,7 +1031,7 @@ def run(args: argparse.Namespace) -> int:
         profile["blog"]["publish_time"] = SLOTS[sent % len(SLOTS)]
         print(f"\n===== {alias} · {profile['blog']['category']} =====")
         try:
-            ok = run_one(alias, profile, args, pools[alias], owner, posted, today)
+            ok = run_one(alias, profile, args, pools[alias], owner, posted, today, cache)
         except Exception:  # 한 인물의 오류가 다른 인물 원고를 막지 않게 한다
             traceback.print_exc()
             ok = False
@@ -1006,6 +1065,14 @@ if __name__ == "__main__":
     if os.environ.get("SELFTEST"):
         geo.selfcheck()
         competition.selfcheck()
+        backdrop.selfcheck()
+        nearmap.selfcheck()
+        block = _around_html("가나 단지", {"cid": "map0@blog", "rough": True, "places": [
+            {"kind": "지하철역", "name": "다역", "how_far": "도보 8분", "lat": 0, "lon": 0},
+            {"kind": "병원", "name": "라병원", "how_far": "900m", "lat": 0, "lon": 0}]})
+        assert "cid:map0@blog" in block and "① 지하철역" in block and "② 병원" in block, block
+        assert "가나 단지 가까이에는 다역(도보 8분), 라병원(900m) 등이 있어요." in block and "대략적인 위치" in block, block
+        assert _around_html("가나 단지", None) == ""
         assert person_checks(("무주택", "혼인 7년 이내"), "예비신혼") == ("무주택", ENGAGED_CHECK)
         assert person_checks(("무주택", "혼인 7년 이내"), "신혼 맞벌이") == ("무주택", "혼인 7년 이내")
         floorplan.selfcheck()
