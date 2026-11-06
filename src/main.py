@@ -629,7 +629,7 @@ def build_post(blog: dict, sale_show, verdicts, degraded, lease_show, rest, intr
     return "".join(out)
 
 
-TAG_MAX = 20  # 네이버 태그 상한은 30개. 너무 많으면 광고성으로 보여 20개로 묶는다
+TAG_MAX = 30  # 네이버 입력란 상한. 채우는 것이 목표가 아니라 넘지 않게 자른다
 
 
 def plain_name(name) -> str:
@@ -685,9 +685,49 @@ def post_title(blog: dict, top: dict, route: str, count: int, today: date) -> st
     return " ".join(x for x in (name, kind, f"평수·분양가·자격, {ask}", when) if x)
 
 
+def place_tags(address) -> list[str]:
+    """주소의 구·동 태그. '부산광역시 수영구 망미동 953' → ['수영구아파트', '망미동청약']."""
+    parts = [x.strip(",") for x in str(address or "").split()]
+    gu = next((x for x in parts[1:3] if x.endswith("구")), parts[1] if len(parts) > 1 else "")
+    dong = next((x for x in parts[1:5] if re.fullmatch(r"[가-힣]+\d*(?:동|읍|면)\d*가?", x)), "")
+    return [f"{gu}아파트" if re.fullmatch(r"[가-힣]+[시군구]", gu) else "", f"{dong}청약" if dong else ""]
+
+
+def builder_tag(item: dict) -> str:
+    """시공사 태그. 브랜드로 추측한 값은 틀릴 수 있어 쓰지 않는다."""
+    info = item.get("builder_info") or {}
+    if info.get("guessed") or not info.get("builder"):
+        return ""
+    return re.sub(r"\(주\)|주식회사|㈜|\s", "", info["builder"].split(",")[0])
+
+
+def top_tags(item: dict) -> list[str]:
+    """대표 공고에만 다는 태그: 단지명 + 속성, 동네, 역, 유형 + 지역, 시공사. 검색어가 '단지명 + 속성' 꼴이다."""
+    if "deadline" in item:  # LH 임대
+        kind = item["kind"].split("(")[0].replace("·", "")
+        address = next((h.get("address") for h in item.get("top") or [] if h.get("address")), "")
+        where = re.sub(r"(특별자치도|특별자치시|특별시|광역시|도)$", "", str(item.get("region") or ""))
+        return [compact(lease_title(item["name"])), f"{where}{kind}" if where else "", *place_tags(address)]
+    short = compact(title_name(item["name"]))
+    station = (item.get("subway") or {}).get("name") or ""
+    kind = {"무순위": "무순위", "임의공급": "임의공급", "오피스텔등": "오피스텔"}.get(item.get("category"), "")
+    gu = next((x for x in str(item.get("address") or "").split()[1:3] if x.endswith("구")), "")
+    return [f"{short}평수", f"{short}분양가", *place_tags(item.get("address")), station,
+            f"{station}아파트" if station else "", f"{item.get('area_name') or ''}{kind}" if kind else "",
+            f"{gu}{kind}" if kind and gu else "", builder_tag(item)]
+
+
 def post_tags(blog: dict, sale_show: list, lease_show: list, verdicts: dict, today: date) -> list[str]:
-    """인물 고정 태그 + 이번 글의 단지명·동네·전형·달. 검색은 '단지명', '부평 청약'처럼 들어온다."""
-    tags = list(blog.get("tags") or [])[:6]
+    """인물 고정 태그 + 이번 글의 단지명·동네·전형·달. 검색은 '단지명', '부평 청약'처럼 들어온다.
+
+    글과 관련 있는 말만 넣는다. 상한까지 채우려고 인기 단어를 넣지 않는다(태그 수와 유입의 관계는 근거가 없다,
+    2026-11-06 조사). 이 글에 없는 지역의 고정 태그('경남청약' 등)도 뺀다.
+    """
+    where = " ".join(str(x.get("area_name") or x.get("region") or "") for x in (*sale_show, *lease_show))
+    fixed = [t for t in (blog.get("tags") or [])
+             if not (t.removesuffix("청약") in market.SIDO_CODES and t.removesuffix("청약") not in where)]
+    tags = fixed[:6]
+    tags += top_tags((sale_show or lease_show)[0])
     for x in sale_show:
         tags.append(compact(x["name"]))
         block = re.search(r"([A-Za-z]{1,2}\d+(?:-\d+)?)\s*(?:블록|BL)", str(x["name"]))
@@ -1161,6 +1201,21 @@ if __name__ == "__main__":
         fake = Verdict(routes=[Route("일반공급 추첨제", "가능", ""), Route("생애최초 특별공급", "조건부", "")])
         assert route_sure(fake, "일반공급") and not route_sure(fake, "생애최초 특공") and not route_sure(None, "일반공급")
         assert compact("인천계양 A17블록 신혼희망타운(공공분양)(본청약)") == "인천계양A17블록신혼희망타운"
+        assert place_tags("부산광역시 수영구 망미동 953") == ["수영구아파트", "망미동청약"]
+        assert place_tags("경기도 수원시 영통구 이의동 1") == ["영통구아파트", "이의동청약"]
+        assert place_tags("충청남도 천안시 동남구 청당4로 20") == ["동남구아파트", ""]
+        assert place_tags("") == ["", ""]
+        assert builder_tag({"builder_info": {"builder": "(주)쌍용건설, 다른회사", "guessed": False}}) == "쌍용건설"
+        assert builder_tag({"builder_info": {"builder": "쌍용건설", "guessed": True}}) == ""
+        got = post_tags({"tags": ["청약", "부산청약", "경남청약", "다자녀"]},
+                        [{"name": "쌍용 더 플래티넘 센텀", "category": "무순위", "area_name": "부산",
+                          "address": "부산광역시 수영구 망미동 953", "subway": {"name": "망미역"},
+                          "house_manage_no": "1", "pblanc_no": "1"}], [], {}, date(2026, 11, 6))
+        assert {"쌍용더플래티넘센텀평수", "쌍용더플래티넘센텀분양가", "수영구아파트", "망미동청약", "망미역", "망미역아파트",
+                "부산무순위", "수영구무순위", "부산청약"} <= set(got) and "경남청약" not in got, got
+        assert len(post_tags({"tags": []}, [{"name": f"단지{i}", "category": "APT", "address": f"서울특별시 강남구 역삼{i}동",
+                                             "house_manage_no": str(i), "pblanc_no": str(i)} for i in range(40)], [], {},
+                             date(2026, 11, 6))) == TAG_MAX
         assert town("인천광역시 부평구 산곡동 10번지") == "부평" and town("경기도 수원시 영통구") == "수원"
         assert town("세종특별자치시 산울동") == "세종"
         print("ok")
